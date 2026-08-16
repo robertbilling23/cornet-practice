@@ -1,1 +1,353 @@
-sdfg
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Brass Sight-Reading & Pitch Trainer</title>
+  <script src="https://cdn.jsdelivr.net/npm/vexflow@4.2.2/build/cjs/vexflow.js"></script>
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --card-bg: #1e293b;
+      --accent: #38bdf8;
+      --success: #22c55e;
+      --text: #f8fafc;
+    }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg-color);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      background: var(--card-bg);
+      padding: 24px;
+      border-radius: 16px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+      width: 100%;
+      max-width: 500px;
+      text-align: center;
+    }
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+    label {
+      display: flex;
+      flex-direction: column;
+      font-size: 0.85rem;
+      color: #94a3b8;
+      gap: 4px;
+      text-align: left;
+    }
+    select, input, button {
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: var(--text);
+      font-size: 1rem;
+    }
+    button.main-btn {
+      grid-column: span 2;
+      background: var(--accent);
+      color: #0f172a;
+      font-weight: bold;
+      border: none;
+      cursor: pointer;
+      padding: 14px;
+      transition: opacity 0.2s;
+    }
+    button.main-btn:hover { opacity: 0.9; }
+    #notation {
+      background: #ffffff;
+      border-radius: 12px;
+      margin: 20px 0;
+      padding: 10px;
+      display: flex;
+      justify-content: center;
+    }
+    .feedback-box {
+      font-size: 1.25rem;
+      font-weight: bold;
+      min-height: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      margin-top: 10px;
+    }
+    .correct { background: var(--success); color: white; }
+    .detecting { color: var(--accent); }
+    .freq-display { font-size: 0.8rem; color: #64748b; margin-top: 4px; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h2>Brass Trainer</h2>
+  
+  <div class="controls">
+    <label>Instrument
+      <select id="instrumentSelect">
+        <option value="Bb">Trumpet / Cornet (B♭)</option>
+        <option value="C">Trombone / Treble C</option>
+      </select>
+    </label>
+
+    <label>Tempo (BPM): <span id="bpmVal">90</span>
+      <input type="range" id="tempoSlider" min="40" max="200" value="90">
+    </label>
+
+    <button id="startBtn" class="main-btn">Start Practice</button>
+  </div>
+
+  <div id="notation"></div>
+  
+  <div id="feedback" class="feedback-box">Press Start</div>
+  <div id="freqInfo" class="freq-display">Detected: -- Hz</div>
+</div>
+
+<script>
+const VF = Vex.Flow;
+
+// Notes array from Low A (A3) up to Third Space C (C5) in Treble Clef
+const NOTES = [
+  { name: "A/3", key: "a/3", pitch: "A3", midi: 57, freq: 220.00 },
+  { name: "B/3", key: "b/3", pitch: "B3", midi: 59, freq: 246.94 },
+  { name: "C/4", key: "c/4", pitch: "C4", midi: 60, freq: 261.63 },
+  { name: "D/4", key: "d/4", pitch: "d/4", midi: 62, freq: 293.66 },
+  { name: "E/4", key: "e/4", pitch: "e/4", midi: 64, freq: 329.63 },
+  { name: "F/4", key: "f/4", pitch: "f/4", midi: 65, freq: 349.23 },
+  { name: "G/4", key: "g/4", pitch: "g/4", midi: 67, freq: 392.00 },
+  { name: "A/4", key: "a/4", pitch: "A4", midi: 69, freq: 440.00 },
+  { name: "B/4", key: "b/4", pitch: "B4", midi: 71, freq: 493.88 },
+  { name: "C/5", key: "c/5", pitch: "C5", midi: 72, freq: 523.25 }
+];
+
+let audioCtx, analyser, micStream;
+let isRunning = false;
+let currentNote = null;
+let metronomeInterval = null;
+let holdCounter = 0;
+
+// UI Elements
+const startBtn = document.getElementById("startBtn");
+const tempoSlider = document.getElementById("tempoSlider");
+const bpmVal = document.getElementById("bpmVal");
+const feedbackEl = document.getElementById("feedback");
+const freqInfoEl = document.getElementById("freqInfo");
+const instrumentSelect = document.getElementById("instrumentSelect");
+
+tempoSlider.oninput = () => {
+  bpmVal.innerText = tempoSlider.value;
+  if (isRunning) resetMetronome();
+};
+
+startBtn.onclick = async () => {
+  if (isRunning) {
+    stopApp();
+  } else {
+    await startApp();
+  }
+};
+
+async function startApp() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const source = audioCtx.createMediaStreamSource(micStream);
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    source.connect(analyser);
+    
+    isRunning = true;
+    startBtn.innerText = "Stop";
+    startBtn.style.background = "#ef4444";
+    
+    resetMetronome();
+    pickRandomNote();
+    detectPitch();
+  } catch (err) {
+    alert("Microphone access is required for pitch detection.");
+  }
+}
+
+function stopApp() {
+  isRunning = false;
+  if (metronomeInterval) clearInterval(metronomeInterval);
+  if (micStream) micStream.getTracks().forEach(track => track.stop());
+  if (audioCtx) audioCtx.close();
+  
+  startBtn.innerText = "Start Practice";
+  startBtn.style.background = "var(--accent)";
+  feedbackEl.innerText = "Press Start";
+  feedbackEl.className = "feedback-box";
+  freqInfoEl.innerText = "Detected: -- Hz";
+}
+
+function resetMetronome() {
+  if (metronomeInterval) clearInterval(metronomeInterval);
+  const ms = (60 / parseInt(tempoSlider.value)) * 1000;
+  metronomeInterval = setInterval(playClick, ms);
+}
+
+function playClick() {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.frequency.value = 1000;
+  gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.05);
+}
+
+function playTargetTone(freq) {
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = "sine";
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.5);
+}
+
+function pickRandomNote() {
+  const randIndex = Math.floor(Math.random() * NOTES.length);
+  currentNote = NOTES[randIndex];
+  renderStaff(currentNote.key);
+  
+  // Get sounding reference frequency based on instrument transposition
+  const soundingFreq = getSoundingFrequency(currentNote.freq);
+  playTargetTone(soundingFreq);
+  
+  holdCounter = 0;
+  feedbackEl.innerText = "Listening...";
+  feedbackEl.className = "feedback-box detecting";
+}
+
+function getSoundingFrequency(writtenFreq) {
+  const inst = instrumentSelect.value;
+  // B♭ Instrument sounds a major 2nd (2 semitones) lower than written
+  if (inst === "Bb") {
+    return writtenFreq * Math.pow(2, -2 / 12);
+  }
+  return writtenFreq; // C Instrument
+}
+
+function renderStaff(noteKey) {
+  const div = document.getElementById("notation");
+  div.innerHTML = "";
+  
+  const renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
+  renderer.resize(200, 140);
+  const context = renderer.getContext();
+  
+  const stave = new VF.Stave(10, 10, 180);
+  stave.addClef("treble").setContext(context).draw();
+  
+  const staveNote = new VF.StaveNote({
+    clef: "treble",
+    keys: [noteKey],
+    duration: "q"
+  });
+  
+  const voice = new VF.Voice({ num_beats: 1, beat_value: 4 });
+  voice.addTickables([staveNote]);
+  
+  new VF.Formatter().joinVoices([voice]).format([voice], 120);
+  voice.draw(context, stave);
+}
+
+// Autocorrelation Pitch Detection Algorithm
+function autoCorrelate(buf, sampleRate) {
+  let SIZE = buf.length;
+  let rms = 0;
+  for (let i = 0; i < SIZE; i++) {
+    let val = buf[i];
+    rms += val * val;
+  }
+  rms = Math.sqrt(rms / SIZE);
+  if (rms < 0.015) return -1; // Ignore background noise
+
+  let r1 = 0, r2 = SIZE - 1, thres = 0.2;
+  for (let i = 0; i < SIZE / 2; i++) {
+    if (Math.abs(buf[i]) < thres) { r1 = i; break; }
+  }
+  for (let i = 1; i < SIZE / 2; i++) {
+    if (Math.abs(buf[SIZE - i]) < thres) { r2 = SIZE - i; break; }
+  }
+
+  buf = buf.slice(r1, r2);
+  SIZE = buf.length;
+
+  let c = new Array(SIZE).fill(0);
+  for (let i = 0; i < SIZE; i++) {
+    for (let j = 0; j < SIZE - i; j++) {
+      c[i] = c[i] + buf[j] * buf[j + i];
+    }
+  }
+
+  let d = 0; while (c[d] > c[d + 1]) d++;
+  let maxval = -1, maxpos = -1;
+  for (let i = d; i < SIZE; i++) {
+    if (c[i] > maxval) {
+      maxval = c[i];
+      maxpos = i;
+    }
+  }
+  let T0 = maxpos;
+
+  return sampleRate / T0;
+}
+
+function detectPitch() {
+  if (!isRunning) return;
+
+  const buf = new Float32Array(2048);
+  analyser.getFloatTimeDomainData(buf);
+  const pitch = autoCorrelate(buf, audioCtx.sampleRate);
+
+  if (pitch !== -1) {
+    freqInfoEl.innerText = `Detected: ${Math.round(pitch)} Hz`;
+    const targetFreq = getSoundingFrequency(currentNote.freq);
+    
+    // Check if detected pitch is within +/- 50 cents of target pitch
+    const centsDifference = 1200 * Math.log2(pitch / targetFreq);
+    
+    if (Math.abs(centsDifference) < 50) {
+      holdCounter++;
+      if (holdCounter > 8) { // Confirmed pitch held for ~150ms
+        feedbackEl.innerText = "Correct! Spot on!";
+        feedbackEl.className = "feedback-box correct";
+        
+        setTimeout(() => {
+          if (isRunning) pickRandomNote();
+        }, 400);
+        holdCounter = 0;
+      }
+    } else {
+      holdCounter = 0;
+    }
+  } else {
+    freqInfoEl.innerText = "Detected: -- Hz";
+  }
+
+  requestAnimationFrame(detectPitch);
+}
+</script>
+</body>
+</html>
