@@ -64,7 +64,6 @@
       border: none;
       cursor: pointer;
       padding: 12px;
-      grid-column: span 1;
     }
     .info-bar {
       display: flex;
@@ -176,7 +175,7 @@
   </div>
 
   <div class="info-bar">
-    <div id="keyDisplay" class="key-info">Key: C Major (Concert)</div>
+    <div id="keyDisplay" class="key-info">Key: C Major / A Minor</div>
     <div class="scoreboard">
       <div>Correct: <span id="correctCnt" class="score-correct">0</span></div>
       <div>Wrong: <span id="wrongCnt" class="score-wrong">0</span></div>
@@ -195,7 +194,7 @@
 <script>
 const VF = Vex.Flow;
 
-// Pitch Master Pool
+// Chromatic Master Pool
 const CHROMATIC_NOTES = [
   { name: "A/3", key: "a/3", freq: 220.00, acc: "" },
   { name: "Bb/3", key: "bb/3", freq: 233.08, acc: "b" },
@@ -219,22 +218,19 @@ const CHROMATIC_NOTES = [
   { name: "E/5", key: "e/5", freq: 659.25, acc: "" }
 ];
 
-// Default Diatonic Pool: Low A (A3) to Third Space C (C5)
-const NATURAL_NOTES = CHROMATIC_NOTES.filter(n => !n.acc);
-
 const KEY_DETAILS = {
-  "C":  { name: "C Major / A Minor", vfKey: "C" },
-  "F":  { name: "F Major / D Minor (1 Flat: B♭)", vfKey: "F" },
-  "Bb": { name: "B♭ Major / G Minor (2 Flats: B♭, E♭)", vfKey: "Bb" },
-  "Eb": { name: "E♭ Major / C Minor (3 Flats: B♭, E♭, A♭)", vfKey: "Eb" },
-  "G":  { name: "G Major / E Minor (1 Sharp: F♯)", vfKey: "G" }
+  "C":  { name: "C Major / A Minor", vfKey: "C", flats: [], sharps: [] },
+  "F":  { name: "F Major / D Minor (1 Flat: B♭)", vfKey: "F", flats: ["b"], sharps: [] },
+  "Bb": { name: "B♭ Major / G Minor (2 Flats: B♭, E♭)", vfKey: "Bb", flats: ["b", "e"], sharps: [] },
+  "Eb": { name: "E♭ Major / C Minor (3 Flats: B♭, E♭, A♭)", vfKey: "Eb", flats: ["b", "e", "a"], sharps: [] },
+  "G":  { name: "G Major / E Minor (1 Sharp: F♯)", vfKey: "G", flats: [], sharps: ["f"] }
 };
 
 let audioCtx, analyser, micStream;
 let isRunning = false;
 let metronomeTimer = null;
 
-let activeNotes = []; // 16 note objects (4 bars x 4 beats)
+let activeNotes = [];
 let currentBeatIndex = -1;
 let noteEvaluated = false;
 let correctCount = 0;
@@ -257,22 +253,18 @@ const keyDisplay = document.getElementById("keyDisplay");
 const cursor = document.getElementById("cursor");
 const wrapper = document.getElementById("notation-wrapper");
 
+// Attach change handlers to instantly redraw score when settings change
+[modeSelect, rootSelect, keySelect, instrumentSelect].forEach(selectEl => {
+  selectEl.addEventListener("change", () => {
+    updateUIState();
+    generateInitialNotes();
+    renderScore();
+  });
+});
+
 tempoSlider.oninput = () => {
   bpmVal.innerText = tempoSlider.value;
   if (isRunning) resetMetronome();
-};
-
-keySelect.onchange = () => {
-  keyDisplay.innerText = `Key: ${KEY_DETAILS[keySelect.value].name}`;
-  if (isRunning) {
-    generateInitialNotes();
-    renderScore();
-  }
-};
-
-modeSelect.onchange = () => {
-  const isArpOrBlues = ["maj_arp", "min_arp", "blues"].includes(modeSelect.value);
-  rootSelect.parentElement.style.opacity = isArpOrBlues ? "1" : "0.4";
 };
 
 startBtn.onclick = async () => {
@@ -282,6 +274,13 @@ startBtn.onclick = async () => {
     await startApp();
   }
 };
+
+function updateUIState() {
+  keyDisplay.innerText = `Key: ${KEY_DETAILS[keySelect.value].name}`;
+  const isArpOrBlues = ["maj_arp", "min_arp", "blues"].includes(modeSelect.value);
+  rootSelect.parentElement.style.opacity = isArpOrBlues ? "1" : "0.4";
+  rootSelect.disabled = !isArpOrBlues;
+}
 
 async function startApp() {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -336,23 +335,33 @@ function updateScoreboard() {
   document.getElementById("accPct").innerText = `${pct}%`;
 }
 
-// NOTE GENERATORS
+function getFilteredNotesForKey() {
+  const currentKeyInfo = KEY_DETAILS[keySelect.value];
+  return CHROMATIC_NOTES.filter(n => {
+    const letter = n.name[0].toLowerCase();
+    if (n.acc === "b") return currentKeyInfo.flats.includes(letter);
+    if (n.acc === "#") return currentKeyInfo.sharps.includes(letter);
+    return !currentKeyInfo.flats.includes(letter) && !currentKeyInfo.sharps.includes(letter);
+  });
+}
+
 function getNextNote() {
   const mode = modeSelect.value;
+  const keyPool = getFilteredNotesForKey();
   let noteObj;
 
   if (mode === "random") {
-    noteObj = NATURAL_NOTES[Math.floor(Math.random() * NATURAL_NOTES.length)];
+    noteObj = keyPool[Math.floor(Math.random() * keyPool.length)];
   } else if (mode === "melodic") {
     const roll = Math.random();
     let step = roll < 0.70 ? (Math.random() < 0.5 ? 1 : -1) : (roll < 0.90 ? (Math.random() < 0.5 ? 2 : -2) : (Math.random() < 0.5 ? 3 : -3));
     let nextIdx = lastMelodicIndex + step;
     if (nextIdx < 0) nextIdx = 1;
-    if (nextIdx >= NATURAL_NOTES.length) nextIdx = NATURAL_NOTES.length - 2;
+    if (nextIdx >= keyPool.length) nextIdx = keyPool.length - 2;
     lastMelodicIndex = nextIdx;
-    noteObj = NATURAL_NOTES[nextIdx];
+    noteObj = keyPool[nextIdx];
   } else {
-    // Arpeggio & Blues generator using full CHROMATIC_NOTES
+    // Arpeggio & Blues generator across CHROMATIC_NOTES
     const rootLetter = rootSelect.value;
     const rootPitches = CHROMATIC_NOTES.filter(n => n.name.startsWith(rootLetter));
     const baseIdx = CHROMATIC_NOTES.indexOf(rootPitches[0] || CHROMATIC_NOTES[0]);
@@ -373,7 +382,7 @@ function getNextNote() {
 
 function generateInitialNotes() {
   activeNotes = [];
-  lastMelodicIndex = 4;
+  lastMelodicIndex = 2;
   for (let i = 0; i < 16; i++) {
     activeNotes.push(getNextNote());
   }
@@ -421,16 +430,12 @@ function advanceBeat() {
   noteEvaluated = false;
   pitchHoldCounter = 0;
 
-  // 4-BAR REFRESH TIMINGS
   if (currentBeatIndex === 12) {
-    // Entered Bar 4 (Beat 12): Regenerate Bars 1 and 2
     regenerateBars([0, 1]);
   } else if (currentBeatIndex >= 16) {
-    // Loop back to Bar 1 (Beat 0): Regenerate Bar 3
     currentBeatIndex = 0;
     regenerateBars([2]);
   } else if (currentBeatIndex === 4) {
-    // Finished Bar 1 (Entered Bar 2 / Beat 4): Regenerate Bar 4
     regenerateBars([3]);
   }
 
@@ -460,6 +465,7 @@ function renderScore() {
   renderer.resize(widthPerBar * 4 + 40, 150);
   const context = renderer.getContext();
   const currentKeySig = keySelect.value;
+  const currentKeyInfo = KEY_DETAILS[currentKeySig];
 
   for (let bar = 0; bar < 4; bar++) {
     const group = context.openGroup();
@@ -486,7 +492,12 @@ function renderScore() {
         duration: "q"
       });
 
-      if (n.acc) {
+      // Render accidentals only if the note's accidental is NOT covered by key signature
+      const letter = n.name[0].toLowerCase();
+      const inKeyFlat = n.acc === "b" && currentKeyInfo.flats.includes(letter);
+      const inKeySharp = n.acc === "#" && currentKeyInfo.sharps.includes(letter);
+
+      if (n.acc && !inKeyFlat && !inKeySharp) {
         sn.addAccidental(0, new VF.Accidental(n.acc));
       }
 
@@ -593,6 +604,11 @@ function detectPitch() {
 
   requestAnimationFrame(detectPitch);
 }
+
+// Initial UI setup on page load
+updateUIState();
+generateInitialNotes();
+renderScore();
 </script>
 </body>
 </html>
