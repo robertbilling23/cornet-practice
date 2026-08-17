@@ -574,7 +574,6 @@ function renderScore() {
   renderer.resize(containerWidth, barHeight * 4 + 20);
   const context = renderer.getContext();
   const currentKeySig = keySelect.value;
-  const currentKeyInfo = KEY_DETAILS[currentKeySig];
 
   let noteOffset = 0;
 
@@ -595,20 +594,12 @@ function renderScore() {
     }
 
     const staveNotes = barNotes.map(n => {
+      // Use exact chromatic VexFlow key (e.g. "eb/4", "f#/4")
       const sn = new VF.StaveNote({
         clef: "treble",
-        keys: [n.vfKey],
+        keys: [n.key],
         duration: n.duration
       });
-
-      const letter = n.name[0].toLowerCase();
-      const inKeyFlat = n.acc === "b" && currentKeyInfo.flats.includes(letter);
-      const inKeySharp = n.acc === "#" && currentKeyInfo.sharps.includes(letter);
-
-      // Add accidental modifiers cleanly without VexFlow key collisions
-      if (n.acc && !inKeyFlat && !inKeySharp) {
-        sn.addAccidental(0, new VF.Accidental(n.acc));
-      }
 
       if (n.status === "correct") {
         sn.setStyle({ fillStyle: "#22c55e", strokeStyle: "#22c55e" });
@@ -620,11 +611,13 @@ function renderScore() {
       return sn;
     });
 
-    const beams = VF.Beam.generateBeams(staveNotes);
-
     const voice = new VF.Voice({ num_beats: 4, beat_value: 4 });
-    voice.setStrict(false);
     voice.addTickables(staveNotes);
+
+    // AUTOMATIC ACCIDENTAL ENGINE: Resolves all Blues sharps/flats & key signature rules natively
+    VF.Accidental.applyAccidentals([voice], currentKeySig);
+
+    const beams = VF.Beam.generateBeams(staveNotes);
 
     new VF.Formatter().joinVoices([voice]).format([voice], containerWidth - 90);
     voice.draw(context, stave);
