@@ -160,7 +160,7 @@
 
     <label>Pattern Mode
       <select id="modeSelect">
-        <option value="melodic">Melodic Steps (with 8ths)</option>
+        <option value="melodic">Melodic Steps (10% 8ths)</option>
         <option value="random">Pure Random</option>
         <option value="maj_arp">Major Arpeggios</option>
         <option value="min_arp">Minor Arpeggios</option>
@@ -211,35 +211,36 @@
   
   <div class="footer-bar">
     <div id="freqInfo" class="freq-display">Detected: -- Hz</div>
-    <div id="versionBadge" class="version-tag">v1.9.0</div>
+    <div id="versionBadge" class="version-tag">v2.0.0</div>
   </div>
 </div>
 
 <script>
-const APP_VERSION = "v1.9.0";
+const APP_VERSION = "v2.0.0";
 const VF = Vex.Flow;
 
+// Cleaned Master Pitch Database: vfKey is safe for VexFlow stave formatting
 const CHROMATIC_NOTES = [
-  { name: "A/3", key: "a/3", freq: 220.00, acc: "" },
-  { name: "Bb/3", key: "bb/3", freq: 233.08, acc: "b" },
-  { name: "B/3", key: "b/3", freq: 246.94, acc: "" },
-  { name: "C/4", key: "c/4", freq: 261.63, acc: "" },
-  { name: "C#/4", key: "c#/4", freq: 277.18, acc: "#" },
-  { name: "D/4", key: "d/4", freq: 293.66, acc: "" },
-  { name: "Eb/4", key: "eb/4", freq: 311.13, acc: "b" },
-  { name: "E/4", key: "e/4", freq: 329.63, acc: "" },
-  { name: "F/4", key: "f/4", freq: 349.23, acc: "" },
-  { name: "F#/4", key: "f#/4", freq: 369.99, acc: "#" },
-  { name: "G/4", key: "g/4", freq: 392.00, acc: "" },
-  { name: "Ab/4", key: "ab/4", freq: 415.30, acc: "b" },
-  { name: "A/4", key: "a/4", freq: 440.00, acc: "" },
-  { name: "Bb/4", key: "bb/4", freq: 466.16, acc: "b" },
-  { name: "B/4", key: "b/4", freq: 493.88, acc: "" },
-  { name: "C/5", key: "c/5", freq: 523.25, acc: "" },
-  { name: "C#/5", key: "c#/5", freq: 554.37, acc: "#" },
-  { name: "D/5", key: "d/5", freq: 587.33, acc: "" },
-  { name: "Eb/5", key: "eb/5", freq: 622.25, acc: "b" },
-  { name: "E/5", key: "e/5", freq: 659.25, acc: "" }
+  { name: "A3",  vfKey: "a/3",  freq: 220.00, acc: "" },
+  { name: "Bb3", vfKey: "b/3",  freq: 233.08, acc: "b" },
+  { name: "B3",  vfKey: "b/3",  freq: 246.94, acc: "" },
+  { name: "C4",  vfKey: "c/4",  freq: 261.63, acc: "" },
+  { name: "C#4", vfKey: "c/4",  freq: 277.18, acc: "#" },
+  { name: "D4",  vfKey: "d/4",  freq: 293.66, acc: "" },
+  { name: "Eb4", vfKey: "e/4",  freq: 311.13, acc: "b" },
+  { name: "E4",  vfKey: "e/4",  freq: 329.63, acc: "" },
+  { name: "F4",  vfKey: "f/4",  freq: 349.23, acc: "" },
+  { name: "F#4", vfKey: "f/4",  freq: 369.99, acc: "#" },
+  { name: "G4",  vfKey: "g/4",  freq: 392.00, acc: "" },
+  { name: "Ab4", vfKey: "a/4",  freq: 415.30, acc: "b" },
+  { name: "A4",  vfKey: "a/4",  freq: 440.00, acc: "" },
+  { name: "Bb4", vfKey: "b/4",  freq: 466.16, acc: "b" },
+  { name: "B4",  vfKey: "b/4",  freq: 493.88, acc: "" },
+  { name: "C5",  vfKey: "c/5",  freq: 523.25, acc: "" },
+  { name: "C#5", vfKey: "c/5",  freq: 554.37, acc: "#" },
+  { name: "D5",  vfKey: "d/5",  freq: 587.33, acc: "" },
+  { name: "Eb5", vfKey: "e/5",  freq: 622.25, acc: "b" },
+  { name: "E5",  vfKey: "e/5",  freq: 659.25, acc: "" }
 ];
 
 const KEY_DETAILS = {
@@ -400,7 +401,7 @@ function getNextNote(forceDuration = null) {
     lastMelodicIndex = nextIdx;
     noteObj = keyPool[nextIdx];
   } else {
-    // Universal Arpeggio & Blues Generator
+    // Robust Arpeggio & Blues Generator
     const rootLetter = rootSelect.value;
     const rootPitches = CHROMATIC_NOTES.filter(n => n.name.startsWith(rootLetter));
     const baseIdx = CHROMATIC_NOTES.indexOf(rootPitches[0] || CHROMATIC_NOTES[0]);
@@ -427,7 +428,8 @@ function generateBarNotes() {
   
   while (beatsInBar < 4) {
     const isMelodic = modeSelect.value === "melodic";
-    const addEighths = isMelodic && Math.random() < 0.35 && (beatsInBar <= 3);
+    // Exact 10% Chance of 8th Note Pair in Melodic Mode
+    const addEighths = isMelodic && (Math.random() < 0.10) && (beatsInBar <= 3);
 
     if (addEighths) {
       notes.push(getNextNote("8"));
@@ -469,7 +471,6 @@ function regenerateSingleBar(barIdx) {
   activeNotes.splice(offset, oldLen, ...newBar);
 }
 
-// Hardware-Precision Web Audio API Scheduler Engine
 function scheduler() {
   while (nextNoteTime < audioCtx.currentTime + 0.1) {
     advanceBeat(nextNoteTime);
@@ -586,11 +587,10 @@ function renderScore() {
     }
 
     const staveNotes = barNotes.map(n => {
-      // Split key name to parse standard notes vs chromatic accidentals safely
-      const rawKey = n.key.replace('#', '').replace('b', '');
+      // vfKey is sanitized to pure diatonic letters ("c/4", "e/4", "b/4")
       const sn = new VF.StaveNote({
         clef: "treble",
-        keys: [n.key],
+        keys: [n.vfKey],
         duration: n.duration
       });
 
@@ -598,6 +598,7 @@ function renderScore() {
       const inKeyFlat = n.acc === "b" && currentKeyInfo.flats.includes(letter);
       const inKeySharp = n.acc === "#" && currentKeyInfo.sharps.includes(letter);
 
+      // Attach accidental modifiers explicitly to prevent formatting crashes
       if (n.acc && !inKeyFlat && !inKeySharp) {
         sn.addAccidental(0, new VF.Accidental(n.acc));
       }
@@ -616,7 +617,7 @@ function renderScore() {
     const beams = VF.Beam.generateBeams(staveNotes);
 
     const voice = new VF.Voice({ num_beats: 4, beat_value: 4 });
-    voice.setStrict(false); // Allow formatting across chromatic variations
+    voice.setStrict(false);
     voice.addTickables(staveNotes);
 
     new VF.Formatter().joinVoices([voice]).format([voice], containerWidth - 90);
