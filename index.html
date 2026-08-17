@@ -88,6 +88,7 @@
       margin: 20px 0;
       padding: 10px;
       overflow-x: auto;
+      min-height: 160px;
     }
     #notation {
       display: inline-block;
@@ -194,7 +195,6 @@
 <script>
 const VF = Vex.Flow;
 
-// Chromatic Master Pool
 const CHROMATIC_NOTES = [
   { name: "A/3", key: "a/3", freq: 220.00, acc: "" },
   { name: "Bb/3", key: "bb/3", freq: 233.08, acc: "b" },
@@ -253,7 +253,6 @@ const keyDisplay = document.getElementById("keyDisplay");
 const cursor = document.getElementById("cursor");
 const wrapper = document.getElementById("notation-wrapper");
 
-// Attach change handlers to instantly redraw score when settings change
 [modeSelect, rootSelect, keySelect, instrumentSelect].forEach(selectEl => {
   selectEl.addEventListener("change", () => {
     updateUIState();
@@ -295,15 +294,19 @@ async function startApp() {
     isRunning = true;
     startBtn.innerText = "Stop";
     startBtn.style.background = "var(--danger)";
-    cursor.style.display = "block";
     
     resetStats();
     generateInitialNotes();
     renderScore();
     
     currentBeatIndex = -1;
-    resetMetronome();
-    detectPitch();
+    cursor.style.display = "block";
+
+    // Allow DOM to settle after mic prompt approval before starting metronome
+    requestAnimationFrame(() => {
+      resetMetronome();
+      detectPitch();
+    });
   } catch (err) {
     alert("Microphone access is required for pitch detection.");
   }
@@ -361,7 +364,6 @@ function getNextNote() {
     lastMelodicIndex = nextIdx;
     noteObj = keyPool[nextIdx];
   } else {
-    // Arpeggio & Blues generator across CHROMATIC_NOTES
     const rootLetter = rootSelect.value;
     const rootPitches = CHROMATIC_NOTES.filter(n => n.name.startsWith(rootLetter));
     const baseIdx = CHROMATIC_NOTES.indexOf(rootPitches[0] || CHROMATIC_NOTES[0]);
@@ -407,6 +409,7 @@ function resetMetronome() {
 }
 
 function playClick() {
+  if (!audioCtx || audioCtx.state !== "running") return;
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
   osc.frequency.value = (currentBeatIndex % 4 === 0) ? 1200 : 800;
@@ -419,7 +422,7 @@ function playClick() {
 }
 
 function advanceBeat() {
-  if (currentBeatIndex >= 0 && !noteEvaluated) {
+  if (currentBeatIndex >= 0 && !noteEvaluated && currentBeatIndex < 16) {
     activeNotes[currentBeatIndex].status = 'wrong';
     wrongCount++;
     updateScoreboard();
@@ -444,7 +447,7 @@ function advanceBeat() {
 }
 
 function updateCursor() {
-  if (currentBeatIndex >= 0 && noteXPositions[currentBeatIndex] !== undefined) {
+  if (currentBeatIndex >= 0 && noteXPositions[currentBeatIndex] !== undefined && !isNaN(noteXPositions[currentBeatIndex])) {
     cursor.style.left = `${noteXPositions[currentBeatIndex]}px`;
   }
 }
@@ -492,7 +495,6 @@ function renderScore() {
         duration: "q"
       });
 
-      // Render accidentals only if the note's accidental is NOT covered by key signature
       const letter = n.name[0].toLowerCase();
       const inKeyFlat = n.acc === "b" && currentKeyInfo.flats.includes(letter);
       const inKeySharp = n.acc === "#" && currentKeyInfo.sharps.includes(letter);
@@ -516,21 +518,24 @@ function renderScore() {
     new VF.Formatter().joinVoices([voice]).format([voice], widthPerBar - 70);
     voice.draw(context, stave);
 
-    const wrapperRect = wrapper.getBoundingClientRect();
-    staveNotes.forEach(sn => {
-      const el = sn.getSVGElement();
-      if (el) {
-        const rect = el.getBoundingClientRect();
-        const centerX = (rect.left + rect.width / 2) - wrapperRect.left - 22;
-        noteXPositions.push(centerX);
-      }
+    // Calculate layout positions after SVG elements render into DOM
+    requestAnimationFrame(() => {
+      const wrapperRect = wrapper.getBoundingClientRect();
+      staveNotes.forEach(sn => {
+        const el = sn.getSVGElement();
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          const centerX = (rect.left + rect.width / 2) - wrapperRect.left - 22;
+          noteXPositions.push(centerX);
+        }
+      });
+      updateCursor();
     });
 
     context.closeGroup();
   }
   
   animatingBars = [];
-  updateCursor();
 }
 
 function autoCorrelate(buf, sampleRate) {
