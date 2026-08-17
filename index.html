@@ -211,36 +211,36 @@
   
   <div class="footer-bar">
     <div id="freqInfo" class="freq-display">Detected: -- Hz</div>
-    <div id="versionBadge" class="version-tag">v2.1.0</div>
+    <div id="versionBadge" class="version-tag">v2.2.0</div>
   </div>
 </div>
 
 <script>
-const APP_VERSION = "v2.1.0";
+const APP_VERSION = "v2.2.0";
 const VF = Vex.Flow;
 
-// Chromatic Master Database using exact VexFlow key specifiers
+// Chromatic Master Database
 const CHROMATIC_NOTES = [
-  { name: "A3",  vfKey: "a/3",  freq: 220.00, acc: "" },
-  { name: "Bb3", vfKey: "bb/3", freq: 233.08, acc: "b" },
-  { name: "B3",  vfKey: "b/3",  freq: 246.94, acc: "" },
-  { name: "C4",  vfKey: "c/4",  freq: 261.63, acc: "" },
-  { name: "C#4", vfKey: "c#/4", freq: 277.18, acc: "#" },
-  { name: "D4",  vfKey: "d/4",  freq: 293.66, acc: "" },
-  { name: "Eb4", vfKey: "eb/4", freq: 311.13, acc: "b" },
-  { name: "E4",  vfKey: "e/4",  freq: 329.63, acc: "" },
-  { name: "F4",  vfKey: "f/4",  freq: 349.23, acc: "" },
-  { name: "F#4", vfKey: "f#/4", freq: 369.99, acc: "#" },
-  { name: "G4",  vfKey: "g/4",  freq: 392.00, acc: "" },
-  { name: "Ab4", vfKey: "ab/4", freq: 415.30, acc: "b" },
-  { name: "A4",  vfKey: "a/4",  freq: 440.00, acc: "" },
-  { name: "Bb4", vfKey: "bb/4", freq: 466.16, acc: "b" },
-  { name: "B4",  vfKey: "b/4",  freq: 493.88, acc: "" },
-  { name: "C5",  vfKey: "c/5",  freq: 523.25, acc: "" },
-  { name: "C#5", vfKey: "c#/5", freq: 554.37, acc: "#" },
-  { name: "D5",  vfKey: "d/5",  freq: 587.33, acc: "" },
-  { name: "Eb5", vfKey: "eb/5", freq: 622.25, acc: "b" },
-  { name: "E5",  vfKey: "e/5",  freq: 659.25, acc: "" }
+  { name: "A3",  key: "a/3",  freq: 220.00, acc: "" },
+  { name: "Bb3", key: "bb/3", freq: 233.08, acc: "b" },
+  { name: "B3",  key: "b/3",  freq: 246.94, acc: "" },
+  { name: "C4",  key: "c/4",  freq: 261.63, acc: "" },
+  { name: "C#4", key: "c#/4", freq: 277.18, acc: "#" },
+  { name: "D4",  key: "d/4",  freq: 293.66, acc: "" },
+  { name: "Eb4", key: "eb/4", freq: 311.13, acc: "b" },
+  { name: "E4",  key: "e/4",  freq: 329.63, acc: "" },
+  { name: "F4",  key: "f/4",  freq: 349.23, acc: "" },
+  { name: "F#4", key: "f#/4", freq: 369.99, acc: "#" },
+  { name: "G4",  key: "g/4",  freq: 392.00, acc: "" },
+  { name: "Ab4", key: "ab/4", freq: 415.30, acc: "b" },
+  { name: "A4",  key: "a/4",  freq: 440.00, acc: "" },
+  { name: "Bb4", key: "bb/4", freq: 466.16, acc: "b" },
+  { name: "B4",  key: "b/4",  freq: 493.88, acc: "" },
+  { name: "C5",  key: "c/5",  freq: 523.25, acc: "" },
+  { name: "C#5", key: "c#/5", freq: 554.37, acc: "#" },
+  { name: "D5",  key: "d/5",  freq: 587.33, acc: "" },
+  { name: "Eb5", key: "eb/5", freq: 622.25, acc: "b" },
+  { name: "E5",  key: "e/5",  freq: 659.25, acc: "" }
 ];
 
 const KEY_DETAILS = {
@@ -574,6 +574,7 @@ function renderScore() {
   renderer.resize(containerWidth, barHeight * 4 + 20);
   const context = renderer.getContext();
   const currentKeySig = keySelect.value;
+  const currentKeyInfo = KEY_DETAILS[currentKeySig];
 
   let noteOffset = 0;
 
@@ -594,12 +595,19 @@ function renderScore() {
     }
 
     const staveNotes = barNotes.map(n => {
-      // Use exact chromatic VexFlow key (e.g. "eb/4", "f#/4")
       const sn = new VF.StaveNote({
         clef: "treble",
         keys: [n.key],
         duration: n.duration
       });
+
+      const letter = n.name[0].toLowerCase();
+      const inKeyFlat = n.acc === "b" && currentKeyInfo.flats.includes(letter);
+      const inKeySharp = n.acc === "#" && currentKeyInfo.sharps.includes(letter);
+
+      if (n.acc && !inKeyFlat && !inKeySharp) {
+        sn.addAccidental(0, new VF.Accidental(n.acc));
+      }
 
       if (n.status === "correct") {
         sn.setStyle({ fillStyle: "#22c55e", strokeStyle: "#22c55e" });
@@ -611,13 +619,11 @@ function renderScore() {
       return sn;
     });
 
-    const voice = new VF.Voice({ num_beats: 4, beat_value: 4 });
-    voice.addTickables(staveNotes);
-
-    // AUTOMATIC ACCIDENTAL ENGINE: Resolves all Blues sharps/flats & key signature rules natively
-    VF.Accidental.applyAccidentals([voice], currentKeySig);
-
     const beams = VF.Beam.generateBeams(staveNotes);
+
+    const voice = new VF.Voice({ num_beats: 4, beat_value: 4 });
+    voice.setStrict(false);
+    voice.addTickables(staveNotes);
 
     new VF.Formatter().joinVoices([voice]).format([voice], containerWidth - 90);
     voice.draw(context, stave);
