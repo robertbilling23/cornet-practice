@@ -11,6 +11,7 @@
       --card-bg: #1e293b;
       --accent: #38bdf8;
       --success: #22c55e;
+      --danger: #ef4444;
       --text: #f8fafc;
     }
     body {
@@ -30,14 +31,15 @@
       border-radius: 16px;
       box-shadow: 0 10px 25px rgba(0,0,0,0.3);
       width: 100%;
-      max-width: 500px;
+      max-width: 900px;
       text-align: center;
     }
     .controls {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr 1fr 1fr;
       gap: 12px;
       margin-bottom: 20px;
+      align-items: center;
     }
     label {
       display: flex;
@@ -56,43 +58,72 @@
       font-size: 1rem;
     }
     button.main-btn {
-      grid-column: span 2;
       background: var(--accent);
       color: #0f172a;
       font-weight: bold;
       border: none;
       cursor: pointer;
-      padding: 14px;
-      transition: opacity 0.2s;
+      padding: 12px;
     }
-    button.main-btn:hover { opacity: 0.9; }
-    #notation {
+    .scoreboard {
+      display: flex;
+      justify-content: space-around;
+      background: #0f172a;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 15px;
+      font-weight: bold;
+    }
+    .score-correct { color: var(--success); }
+    .score-wrong { color: var(--danger); }
+    .score-acc { color: var(--accent); }
+
+    #notation-wrapper {
+      position: relative;
       background: #ffffff;
       border-radius: 12px;
       margin: 20px 0;
       padding: 10px;
-      display: flex;
-      justify-content: center;
+      overflow-x: auto;
     }
-    .feedback-box {
-      font-size: 1.25rem;
-      font-weight: bold;
-      min-height: 40px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 8px;
-      margin-top: 10px;
+    #notation {
+      display: inline-block;
     }
-    .correct { background: var(--success); color: white; }
-    .detecting { color: var(--accent); }
-    .freq-display { font-size: 0.8rem; color: #64748b; margin-top: 4px; }
+    #cursor {
+      position: absolute;
+      width: 45px;
+      height: 110px;
+      top: 25px;
+      left: 0;
+      background: rgba(56, 189, 248, 0.25);
+      border: 2px solid var(--accent);
+      border-radius: 6px;
+      pointer-events: none;
+      transition: left 0.08s ease-out;
+      display: none;
+    }
+    .freq-display { font-size: 0.85rem; color: #64748b; margin-top: 4px; }
+
+    /* Left-to-Right Fade Transition for Bar Regeneration */
+    @keyframes ltrFade {
+      0% {
+        clip-path: polygon(0 0, 0 0, 0 100%, 0 100%);
+        opacity: 0.2;
+      }
+      100% {
+        clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+        opacity: 1;
+      }
+    }
+    .bar-animating {
+      animation: ltrFade 0.45s ease-out forwards;
+    }
   </style>
 </head>
 <body>
 
 <div class="container">
-  <h2>Brass Trainer</h2>
+  <h2>Brass Sight-Reading Trainer</h2>
   
   <div class="controls">
     <label>Instrument
@@ -102,49 +133,64 @@
       </select>
     </label>
 
-    <label>Tempo (BPM): <span id="bpmVal">90</span>
-      <input type="range" id="tempoSlider" min="40" max="200" value="90">
+    <label>Tempo (BPM): <span id="bpmVal">80</span>
+      <input type="range" id="tempoSlider" min="40" max="180" value="80">
     </label>
 
     <button id="startBtn" class="main-btn">Start Practice</button>
   </div>
 
-  <div id="notation"></div>
+  <div class="scoreboard">
+    <div>Correct: <span id="correctCnt" class="score-correct">0</span></div>
+    <div>Wrong: <span id="wrongCnt" class="score-wrong">0</span></div>
+    <div>Accuracy: <span id="accPct" class="score-acc">100%</span></div>
+  </div>
+
+  <div id="notation-wrapper">
+    <div id="notation"></div>
+    <div id="cursor"></div>
+  </div>
   
-  <div id="feedback" class="feedback-box">Press Start</div>
   <div id="freqInfo" class="freq-display">Detected: -- Hz</div>
 </div>
 
 <script>
 const VF = Vex.Flow;
 
-// Notes array from Low A (A3) up to Third Space C (C5) in Treble Clef
+// Note Pool: Low A (A3) to Third Space C (C5)
 const NOTES = [
-  { name: "A/3", key: "a/3", pitch: "A3", midi: 57, freq: 220.00 },
-  { name: "B/3", key: "b/3", pitch: "B3", midi: 59, freq: 246.94 },
-  { name: "C/4", key: "c/4", pitch: "C4", midi: 60, freq: 261.63 },
-  { name: "D/4", key: "d/4", pitch: "d/4", midi: 62, freq: 293.66 },
-  { name: "E/4", key: "e/4", pitch: "e/4", midi: 64, freq: 329.63 },
-  { name: "F/4", key: "f/4", pitch: "f/4", midi: 65, freq: 349.23 },
-  { name: "G/4", key: "g/4", pitch: "g/4", midi: 67, freq: 392.00 },
-  { name: "A/4", key: "a/4", pitch: "A4", midi: 69, freq: 440.00 },
-  { name: "B/4", key: "b/4", pitch: "B4", midi: 71, freq: 493.88 },
-  { name: "C/5", key: "c/5", pitch: "C5", midi: 72, freq: 523.25 }
+  { name: "A/3", key: "a/3", pitch: "A3", freq: 220.00 },
+  { name: "B/3", key: "b/3", pitch: "B3", freq: 246.94 },
+  { name: "C/4", key: "c/4", pitch: "C4", freq: 261.63 },
+  { name: "D/4", key: "d/4", pitch: "d/4", freq: 293.66 },
+  { name: "E/4", key: "e/4", pitch: "e/4", freq: 329.63 },
+  { name: "F/4", key: "f/4", pitch: "f/4", freq: 349.23 },
+  { name: "G/4", key: "g/4", pitch: "G4", freq: 392.00 },
+  { name: "A/4", key: "a/4", pitch: "A4", freq: 440.00 },
+  { name: "B/4", key: "b/4", pitch: "B4", freq: 493.88 },
+  { name: "C/5", key: "c/5", pitch: "C5", freq: 523.25 }
 ];
 
 let audioCtx, analyser, micStream;
 let isRunning = false;
-let currentNote = null;
-let metronomeInterval = null;
-let holdCounter = 0;
+let metronomeTimer = null;
 
-// UI Elements
+let activeNotes = []; // 12 note objects with status ('pending', 'correct', 'wrong')
+let currentBeatIndex = -1;
+let noteEvaluated = false;
+let correctCount = 0;
+let wrongCount = 0;
+let pitchHoldCounter = 0;
+
+let animatingBar = null;
+let noteXPositions = [];
+
 const startBtn = document.getElementById("startBtn");
 const tempoSlider = document.getElementById("tempoSlider");
 const bpmVal = document.getElementById("bpmVal");
-const feedbackEl = document.getElementById("feedback");
 const freqInfoEl = document.getElementById("freqInfo");
 const instrumentSelect = document.getElementById("instrumentSelect");
+const cursor = document.getElementById("cursor");
 
 tempoSlider.oninput = () => {
   bpmVal.innerText = tempoSlider.value;
@@ -171,10 +217,15 @@ async function startApp() {
     
     isRunning = true;
     startBtn.innerText = "Stop";
-    startBtn.style.background = "#ef4444";
+    startBtn.style.background = "var(--danger)";
+    cursor.style.display = "block";
     
+    resetStats();
+    generateInitialNotes();
+    renderScore();
+    
+    currentBeatIndex = -1;
     resetMetronome();
-    pickRandomNote();
     detectPitch();
   } catch (err) {
     alert("Microphone access is required for pitch detection.");
@@ -183,105 +234,176 @@ async function startApp() {
 
 function stopApp() {
   isRunning = false;
-  if (metronomeInterval) clearInterval(metronomeInterval);
+  if (metronomeTimer) clearInterval(metronomeTimer);
   if (micStream) micStream.getTracks().forEach(track => track.stop());
   if (audioCtx) audioCtx.close();
   
   startBtn.innerText = "Start Practice";
   startBtn.style.background = "var(--accent)";
-  feedbackEl.innerText = "Press Start";
-  feedbackEl.className = "feedback-box";
+  cursor.style.display = "none";
   freqInfoEl.innerText = "Detected: -- Hz";
 }
 
+function resetStats() {
+  correctCount = 0;
+  wrongCount = 0;
+  updateScoreboard();
+}
+
+function updateScoreboard() {
+  document.getElementById("correctCnt").innerText = correctCount;
+  document.getElementById("wrongCnt").innerText = wrongCount;
+  const total = correctCount + wrongCount;
+  const pct = total === 0 ? 100 : Math.round((correctCount / total) * 100);
+  document.getElementById("accPct").innerText = `${pct}%`;
+}
+
+function getRandomNote() {
+  const note = NOTES[Math.floor(Math.random() * NOTES.length)];
+  return { ...note, status: 'pending' };
+}
+
+function generateInitialNotes() {
+  activeNotes = [];
+  for (let i = 0; i < 12; i++) {
+    activeNotes.push(getRandomNote());
+  }
+}
+
+function regenerateBar(barIndex) {
+  for (let i = 0; i < 4; i++) {
+    activeNotes[barIndex * 4 + i] = getRandomNote();
+  }
+  animatingBar = barIndex;
+  renderScore();
+}
+
 function resetMetronome() {
-  if (metronomeInterval) clearInterval(metronomeInterval);
-  const ms = (60 / parseInt(tempoSlider.value)) * 1000;
-  metronomeInterval = setInterval(playClick, ms);
+  if (metronomeTimer) clearInterval(metronomeTimer);
+  const intervalMs = (60 / parseInt(tempoSlider.value)) * 1000;
+  
+  advanceBeat();
+  metronomeTimer = setInterval(advanceBeat, intervalMs);
 }
 
 function playClick() {
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
-  osc.frequency.value = 1000;
+  osc.frequency.value = (currentBeatIndex % 4 === 0) ? 1200 : 800;
   gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.04);
   osc.connect(gain);
   gain.connect(audioCtx.destination);
   osc.start();
-  osc.stop(audioCtx.currentTime + 0.05);
+  osc.stop(audioCtx.currentTime + 0.04);
 }
 
-function playTargetTone(freq) {
-  const osc = audioCtx.createOscillator();
-  const gain = audioCtx.createGain();
-  osc.type = "sine";
-  osc.frequency.value = freq;
-  gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
-  osc.connect(gain);
-  gain.connect(audioCtx.destination);
-  osc.start();
-  osc.stop(audioCtx.currentTime + 0.5);
-}
+function advanceBeat() {
+  // Check previous beat result: mark wrong if not hit during beat
+  if (currentBeatIndex >= 0 && !noteEvaluated) {
+    activeNotes[currentBeatIndex].status = 'wrong';
+    wrongCount++;
+    updateScoreboard();
+    renderScore();
+  }
+  
+  currentBeatIndex++;
+  noteEvaluated = false;
+  pitchHoldCounter = 0;
 
-function pickRandomNote() {
-  const randIndex = Math.floor(Math.random() * NOTES.length);
-  currentNote = NOTES[randIndex];
-  renderStaff(currentNote.key);
-  
-  // Get sounding reference frequency based on instrument transposition
-  const soundingFreq = getSoundingFrequency(currentNote.freq);
-  playTargetTone(soundingFreq);
-  
-  holdCounter = 0;
-  feedbackEl.innerText = "Listening...";
-  feedbackEl.className = "feedback-box detecting";
+  // Handle bar recycling and smooth transitions:
+  if (currentBeatIndex >= 12) { // Finished Bar 3 -> Back to Bar 1 (Beat 0)
+    currentBeatIndex = 0;
+    regenerateBar(1); // Regenerate Bar 2 on returning to Bar 1
+  } else if (currentBeatIndex === 2) { // Beat 2 of Bar 1
+    regenerateBar(2); // Regenerate Bar 3
+  } else if (currentBeatIndex === 8) { // Beat 8 (Start of Bar 3)
+    regenerateBar(0); // Regenerate Bar 1
+  }
+
+  // Update cursor position
+  if (noteXPositions[currentBeatIndex] !== undefined) {
+    cursor.style.left = `${noteXPositions[currentBeatIndex] - 14}px`;
+  }
+
+  playClick();
 }
 
 function getSoundingFrequency(writtenFreq) {
-  const inst = instrumentSelect.value;
-  // B♭ Instrument sounds a major 2nd (2 semitones) lower than written
-  if (inst === "Bb") {
-    return writtenFreq * Math.pow(2, -2 / 12);
-  }
-  return writtenFreq; // C Instrument
+  return instrumentSelect.value === "Bb" 
+    ? writtenFreq * Math.pow(2, -2 / 12) 
+    : writtenFreq;
 }
 
-function renderStaff(noteKey) {
+function renderScore() {
   const div = document.getElementById("notation");
   div.innerHTML = "";
-  
+  noteXPositions = [];
+
+  const widthPerBar = 250;
   const renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
-  renderer.resize(200, 140);
+  renderer.resize(widthPerBar * 3 + 40, 150);
   const context = renderer.getContext();
+
+  for (let bar = 0; bar < 3; bar++) {
+    const group = context.openGroup();
+    group.id = `bar-group-${bar}`;
+    
+    if (bar === animatingBar) {
+      group.classList.add('bar-animating');
+    }
+
+    const xPos = 10 + (bar * widthPerBar);
+    const stave = new VF.Stave(xPos, 10, widthPerBar);
+    
+    if (bar === 0) stave.addClef("treble");
+    stave.setContext(context).draw();
+
+    const barNotes = activeNotes.slice(bar * 4, (bar * 4) + 4);
+    const staveNotes = barNotes.map(n => {
+      const sn = new VF.StaveNote({
+        clef: "treble",
+        keys: [n.key],
+        duration: "q"
+      });
+
+      // Color coding notes based on correctness
+      if (n.status === "correct") {
+        sn.setStyle({ fillStyle: "#22c55e", strokeStyle: "#22c55e" });
+      } else if (n.status === "wrong") {
+        sn.setStyle({ fillStyle: "#ef4444", strokeStyle: "#ef4444" });
+      }
+
+      return sn;
+    });
+
+    const voice = new VF.Voice({ num_beats: 4, beat_value: 4 });
+    voice.addTickables(staveNotes);
+
+    new VF.Formatter().joinVoices([voice]).format([voice], widthPerBar - 60);
+    voice.draw(context, stave);
+
+    staveNotes.forEach(sn => {
+      noteXPositions.push(xPos + sn.getAbsoluteX());
+    });
+
+    context.closeGroup();
+  }
   
-  const stave = new VF.Stave(10, 10, 180);
-  stave.addClef("treble").setContext(context).draw();
-  
-  const staveNote = new VF.StaveNote({
-    clef: "treble",
-    keys: [noteKey],
-    duration: "q"
-  });
-  
-  const voice = new VF.Voice({ num_beats: 1, beat_value: 4 });
-  voice.addTickables([staveNote]);
-  
-  new VF.Formatter().joinVoices([voice]).format([voice], 120);
-  voice.draw(context, stave);
+  animatingBar = null;
+
+  if (currentBeatIndex >= 0 && noteXPositions[currentBeatIndex] !== undefined) {
+    cursor.style.left = `${noteXPositions[currentBeatIndex] - 14}px`;
+  }
 }
 
 // Autocorrelation Pitch Detection Algorithm
 function autoCorrelate(buf, sampleRate) {
   let SIZE = buf.length;
   let rms = 0;
-  for (let i = 0; i < SIZE; i++) {
-    let val = buf[i];
-    rms += val * val;
-  }
+  for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
   rms = Math.sqrt(rms / SIZE);
-  if (rms < 0.015) return -1; // Ignore background noise
+  if (rms < 0.015) return -1;
 
   let r1 = 0, r2 = SIZE - 1, thres = 0.2;
   for (let i = 0; i < SIZE / 2; i++) {
@@ -309,9 +431,7 @@ function autoCorrelate(buf, sampleRate) {
       maxpos = i;
     }
   }
-  let T0 = maxpos;
-
-  return sampleRate / T0;
+  return sampleRate / maxpos;
 }
 
 function detectPitch() {
@@ -323,24 +443,25 @@ function detectPitch() {
 
   if (pitch !== -1) {
     freqInfoEl.innerText = `Detected: ${Math.round(pitch)} Hz`;
-    const targetFreq = getSoundingFrequency(currentNote.freq);
     
-    // Check if detected pitch is within +/- 50 cents of target pitch
-    const centsDifference = 1200 * Math.log2(pitch / targetFreq);
-    
-    if (Math.abs(centsDifference) < 50) {
-      holdCounter++;
-      if (holdCounter > 8) { // Confirmed pitch held for ~150ms
-        feedbackEl.innerText = "Correct! Spot on!";
-        feedbackEl.className = "feedback-box correct";
-        
-        setTimeout(() => {
-          if (isRunning) pickRandomNote();
-        }, 400);
-        holdCounter = 0;
+    if (currentBeatIndex >= 0 && currentBeatIndex < 12 && !noteEvaluated) {
+      const targetNote = activeNotes[currentBeatIndex];
+      const targetFreq = getSoundingFrequency(targetNote.freq);
+      
+      const cents = 1200 * Math.log2(pitch / targetFreq);
+      
+      if (Math.abs(cents) < 50) {
+        pitchHoldCounter++;
+        if (pitchHoldCounter >= 5) { // Held pitch confirmed
+          activeNotes[currentBeatIndex].status = 'correct';
+          correctCount++;
+          noteEvaluated = true;
+          updateScoreboard();
+          renderScore();
+        }
+      } else {
+        pitchHoldCounter = 0;
       }
-    } else {
-      holdCounter = 0;
     }
   } else {
     freqInfoEl.innerText = "Detected: -- Hz";
