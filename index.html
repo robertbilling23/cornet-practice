@@ -207,14 +207,15 @@
   
   <div class="footer-bar">
     <div id="freqInfo" class="freq-display">Detected: -- Hz</div>
-    <div id="versionBadge" class="version-tag">v1.4.0</div>
+    <div id="versionBadge" class="version-tag">v1.5.0</div>
   </div>
 </div>
 
 <script>
-const APP_VERSION = "v1.4.0";
+const APP_VERSION = "v1.5.0";
 const VF = Vex.Flow;
 
+// Chromatic Master Database
 const CHROMATIC_NOTES = [
   { name: "A/3", key: "a/3", freq: 220.00, acc: "" },
   { name: "Bb/3", key: "bb/3", freq: 233.08, acc: "b" },
@@ -246,7 +247,9 @@ const KEY_DETAILS = {
   "G":  { name: "G Major / E Minor (1 Sharp: F♯)", vfKey: "G", flats: [], sharps: ["f"] }
 };
 
-let audioCtx, analyser, micStream;
+let audioCtx = null;
+let analyser = null;
+let micStream = null;
 let isRunning = false;
 let metronomeTimer = null;
 
@@ -259,6 +262,7 @@ let pitchHoldCounter = 0;
 
 let animatingBars = [];
 let noteXPositions = [];
+let sequenceStep = 0;
 let lastMelodicIndex = 4;
 
 const startBtn = document.getElementById("startBtn");
@@ -276,6 +280,7 @@ const wrapper = document.getElementById("notation-wrapper");
 [modeSelect, rootSelect, keySelect, instrumentSelect].forEach(selectEl => {
   selectEl.addEventListener("change", () => {
     updateUIState();
+    sequenceStep = 0;
     generateInitialNotes();
     renderScore();
   });
@@ -301,31 +306,40 @@ function updateUIState() {
   rootSelect.disabled = !isArpOrBlues;
 }
 
-async function startApp() {
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  
-  try {
+// Persistent Audio Context Setup (Requests Mic Only Once)
+async function initAudio() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === "suspended") {
+    await audioCtx.resume();
+  }
+  if (!micStream) {
     micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const source = audioCtx.createMediaStreamSource(micStream);
     analyser = audioCtx.createAnalyser();
     analyser.fftSize = 2048;
     source.connect(analyser);
-    
+  }
+}
+
+async function startApp() {
+  try {
+    await initAudio();
     isRunning = true;
     startBtn.innerText = "Stop";
     startBtn.style.background = "var(--danger)";
     
     resetStats();
+    sequenceStep = 0;
     generateInitialNotes();
     renderScore();
     
     currentBeatIndex = -1;
     cursor.style.display = "block";
 
-    requestAnimationFrame(() => {
-      resetMetronome();
-      detectPitch();
-    });
+    resetMetronome();
+    detectPitch();
   } catch (err) {
     alert("Microphone access is required for pitch detection.");
   }
@@ -334,9 +348,6 @@ async function startApp() {
 function stopApp() {
   isRunning = false;
   if (metronomeTimer) clearInterval(metronomeTimer);
-  if (micStream) micStream.getTracks().forEach(track => track.stop());
-  if (audioCtx) audioCtx.close();
-  
   startBtn.innerText = "Start Practice";
   startBtn.style.background = "var(--accent)";
   cursor.style.display = "none";
@@ -367,6 +378,7 @@ function getFilteredNotesForKey() {
   });
 }
 
+// Sequence Generator for Ascending/Descending Arpeggios & Blues
 function getNextNote() {
   const mode = modeSelect.value;
   const keyPool = getFilteredNotesForKey();
@@ -383,16 +395,19 @@ function getNextNote() {
     lastMelodicIndex = nextIdx;
     noteObj = keyPool[nextIdx];
   } else {
+    // SEQUENTIAL Ascending then Descending Arpeggios & Blues Pattern
     const rootLetter = rootSelect.value;
     const rootPitches = CHROMATIC_NOTES.filter(n => n.name.startsWith(rootLetter));
     const baseIdx = CHROMATIC_NOTES.indexOf(rootPitches[0] || CHROMATIC_NOTES[0]);
     
     let intervals = [];
-    if (mode === "maj_arp") intervals = [0, 4, 7, 12, 7, 4];
-    else if (mode === "min_arp") intervals = [0, 3, 7, 12, 7, 3];
-    else if (mode === "blues") intervals = [0, 3, 5, 6, 7, 10, 12];
+    if (mode === "maj_arp") intervals = [0, 4, 7, 12, 7, 4]; // Root, 3rd, 5th, Octave, 5th, 3rd
+    else if (mode === "min_arp") intervals = [0, 3, 7, 12, 7, 3]; // Root, b3rd, 5th, Octave, 5th, b3rd
+    else if (mode === "blues") intervals = [0, 3, 5, 6, 7, 10, 12, 10, 7, 6, 5, 3]; // Blues Scale Up & Down
 
-    const chosenInterval = intervals[Math.floor(Math.random() * intervals.length)];
+    const chosenInterval = intervals[sequenceStep % intervals.length];
+    sequenceStep++;
+
     let targetIdx = baseIdx + chosenInterval;
     if (targetIdx >= CHROMATIC_NOTES.length) targetIdx = baseIdx;
     noteObj = CHROMATIC_NOTES[targetIdx];
@@ -427,7 +442,6 @@ function resetMetronome() {
   metronomeTimer = setInterval(advanceBeat, intervalMs);
 }
 
-// Play Target Note Tone through Speaker instead of Click
 function playTargetTone() {
   if (!audioCtx || audioCtx.state !== "running" || currentBeatIndex < 0 || currentBeatIndex >= 16) return;
   
@@ -440,7 +454,6 @@ function playTargetTone() {
   osc.type = "sine";
   osc.frequency.value = targetFreq;
 
-  // Gentle attack & release pulse on beat
   gain.gain.setValueAtTime(0.001, audioCtx.currentTime);
   gain.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + 0.05);
   gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
@@ -477,7 +490,7 @@ function advanceBeat() {
 }
 
 function updateCursor() {
-  if (currentBeatIndex >= 0 && noteXPositions[currentBeatIndex] !== undefined && !isNaN(noteXPositions[currentBeatIndex])) {
+  if (currentBeatIndex >= 0 && noteXPositions[currentBeatIndex] !== undefined) {
     cursor.style.left = `${noteXPositions[currentBeatIndex]}px`;
   }
 }
@@ -533,7 +546,6 @@ function renderScore() {
         sn.addAccidental(0, new VF.Accidental(n.acc));
       }
 
-      // Render Ticks (above) and Crosses (below)
       if (n.status === "correct") {
         sn.setStyle({ fillStyle: "#22c55e", strokeStyle: "#22c55e" });
         sn.addModifier(new VF.Articulation("a|").setPosition(VF.Modifier.Position.ABOVE), 0);
@@ -551,23 +563,21 @@ function renderScore() {
     new VF.Formatter().joinVoices([voice]).format([voice], widthPerBar - 70);
     voice.draw(context, stave);
 
-    requestAnimationFrame(() => {
-      const wrapperRect = wrapper.getBoundingClientRect();
-      staveNotes.forEach(sn => {
-        const el = sn.getSVGElement();
-        if (el) {
-          const rect = el.getBoundingClientRect();
-          const centerX = (rect.left + rect.width / 2) - wrapperRect.left - 22;
-          noteXPositions.push(centerX);
-        }
-      });
-      updateCursor();
+    // Calculate layout coordinates robustly using VexFlow SVG element bounding boxes
+    staveNotes.forEach(sn => {
+      const el = sn.getSVGElement();
+      if (el) {
+        const bbox = el.getBBox();
+        const centerX = xPos + bbox.x + (bbox.width / 2) - 15;
+        noteXPositions.push(centerX);
+      }
     });
 
     context.closeGroup();
   }
   
   animatingBars = [];
+  updateCursor();
 }
 
 function autoCorrelate(buf, sampleRate) {
@@ -642,30 +652,10 @@ function detectPitch() {
   requestAnimationFrame(detectPitch);
 }
 
-// Optional GitHub API Version Auto-Fetcher
-async function fetchLatestGitHubVersion() {
-  const badge = document.getElementById("versionBadge");
-  badge.innerText = APP_VERSION;
-  try {
-    // Replace with your GitHub user/repo path once hosted
-    const pathParts = window.location.pathname.split('/').filter(Boolean);
-    if (pathParts.length > 0) {
-      const repoName = pathParts[0];
-      const res = await fetch(`https://api.github.com/repos/${window.location.hostname.split('.')[0]}/${repoName}/commits/main`);
-      if (res.ok) {
-        const data = await res.json();
-        badge.innerText = `${APP_VERSION} (${data.sha.substring(0, 7)})`;
-      }
-    }
-  } catch (e) {
-    // Fall back to local hardcoded version constant
-  }
-}
-
+// Initialize layout
 updateUIState();
 generateInitialNotes();
 renderScore();
-fetchLatestGitHubVersion();
 </script>
 </body>
 </html>
