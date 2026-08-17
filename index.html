@@ -88,7 +88,7 @@
       margin: 20px 0;
       padding: 10px;
       overflow-x: auto;
-      min-height: 160px;
+      min-height: 170px;
     }
     #notation {
       display: inline-block;
@@ -97,7 +97,7 @@
       position: absolute;
       width: 45px;
       height: 110px;
-      top: 25px;
+      top: 30px;
       left: 0;
       background: rgba(56, 189, 248, 0.25);
       border: 2px solid var(--accent);
@@ -107,6 +107,22 @@
       display: none;
     }
     .freq-display { font-size: 0.85rem; color: #64748b; margin-top: 4px; }
+    
+    .footer-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 15px;
+      font-size: 0.8rem;
+      color: #64748b;
+    }
+    .version-tag {
+      background: #0f172a;
+      padding: 4px 10px;
+      border-radius: 12px;
+      border: 1px solid #334155;
+      color: var(--accent);
+    }
 
     @keyframes ltrFade {
       0% {
@@ -189,10 +205,14 @@
     <div id="cursor"></div>
   </div>
   
-  <div id="freqInfo" class="freq-display">Detected: -- Hz</div>
+  <div class="footer-bar">
+    <div id="freqInfo" class="freq-display">Detected: -- Hz</div>
+    <div id="versionBadge" class="version-tag">v1.4.0</div>
+  </div>
 </div>
 
 <script>
+const APP_VERSION = "v1.4.0";
 const VF = Vex.Flow;
 
 const CHROMATIC_NOTES = [
@@ -302,7 +322,6 @@ async function startApp() {
     currentBeatIndex = -1;
     cursor.style.display = "block";
 
-    // Allow DOM to settle after mic prompt approval before starting metronome
     requestAnimationFrame(() => {
       resetMetronome();
       detectPitch();
@@ -408,17 +427,28 @@ function resetMetronome() {
   metronomeTimer = setInterval(advanceBeat, intervalMs);
 }
 
-function playClick() {
-  if (!audioCtx || audioCtx.state !== "running") return;
+// Play Target Note Tone through Speaker instead of Click
+function playTargetTone() {
+  if (!audioCtx || audioCtx.state !== "running" || currentBeatIndex < 0 || currentBeatIndex >= 16) return;
+  
+  const targetNote = activeNotes[currentBeatIndex];
+  const targetFreq = getSoundingFrequency(targetNote.freq);
+
   const osc = audioCtx.createOscillator();
   const gain = audioCtx.createGain();
-  osc.frequency.value = (currentBeatIndex % 4 === 0) ? 1200 : 800;
-  gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.04);
+
+  osc.type = "sine";
+  osc.frequency.value = targetFreq;
+
+  // Gentle attack & release pulse on beat
+  gain.gain.setValueAtTime(0.001, audioCtx.currentTime);
+  gain.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + 0.05);
+  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+
   osc.connect(gain);
   gain.connect(audioCtx.destination);
   osc.start();
-  osc.stop(audioCtx.currentTime + 0.04);
+  osc.stop(audioCtx.currentTime + 0.35);
 }
 
 function advanceBeat() {
@@ -443,7 +473,7 @@ function advanceBeat() {
   }
 
   updateCursor();
-  playClick();
+  playTargetTone();
 }
 
 function updateCursor() {
@@ -465,7 +495,7 @@ function renderScore() {
 
   const widthPerBar = 240;
   const renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
-  renderer.resize(widthPerBar * 4 + 40, 150);
+  renderer.resize(widthPerBar * 4 + 40, 160);
   const context = renderer.getContext();
   const currentKeySig = keySelect.value;
   const currentKeyInfo = KEY_DETAILS[currentKeySig];
@@ -479,7 +509,7 @@ function renderScore() {
     }
 
     const xPos = 10 + (bar * widthPerBar);
-    const stave = new VF.Stave(xPos, 10, widthPerBar);
+    const stave = new VF.Stave(xPos, 15, widthPerBar);
     
     if (bar === 0) {
       stave.addClef("treble");
@@ -503,10 +533,13 @@ function renderScore() {
         sn.addAccidental(0, new VF.Accidental(n.acc));
       }
 
+      // Render Ticks (above) and Crosses (below)
       if (n.status === "correct") {
         sn.setStyle({ fillStyle: "#22c55e", strokeStyle: "#22c55e" });
+        sn.addModifier(new VF.Articulation("a|").setPosition(VF.Modifier.Position.ABOVE), 0);
       } else if (n.status === "wrong") {
         sn.setStyle({ fillStyle: "#ef4444", strokeStyle: "#ef4444" });
+        sn.addModifier(new VF.Articulation("a@a").setPosition(VF.Modifier.Position.BELOW), 0);
       }
 
       return sn;
@@ -518,7 +551,6 @@ function renderScore() {
     new VF.Formatter().joinVoices([voice]).format([voice], widthPerBar - 70);
     voice.draw(context, stave);
 
-    // Calculate layout positions after SVG elements render into DOM
     requestAnimationFrame(() => {
       const wrapperRect = wrapper.getBoundingClientRect();
       staveNotes.forEach(sn => {
@@ -610,10 +642,30 @@ function detectPitch() {
   requestAnimationFrame(detectPitch);
 }
 
-// Initial UI setup on page load
+// Optional GitHub API Version Auto-Fetcher
+async function fetchLatestGitHubVersion() {
+  const badge = document.getElementById("versionBadge");
+  badge.innerText = APP_VERSION;
+  try {
+    // Replace with your GitHub user/repo path once hosted
+    const pathParts = window.location.pathname.split('/').filter(Boolean);
+    if (pathParts.length > 0) {
+      const repoName = pathParts[0];
+      const res = await fetch(`https://api.github.com/repos/${window.location.hostname.split('.')[0]}/${repoName}/commits/main`);
+      if (res.ok) {
+        const data = await res.json();
+        badge.innerText = `${APP_VERSION} (${data.sha.substring(0, 7)})`;
+      }
+    }
+  } catch (e) {
+    // Fall back to local hardcoded version constant
+  }
+}
+
 updateUIState();
 generateInitialNotes();
 renderScore();
+fetchLatestGitHubVersion();
 </script>
 </body>
 </html>
