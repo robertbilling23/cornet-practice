@@ -93,7 +93,7 @@
       font-weight: bold;
     }
     .key-info { color: var(--accent); font-size: 0.95rem; }
-    .scoreboard { display: flex; justify-space-around; width: 100%; font-size: 0.9rem; }
+    .scoreboard { display: flex; justify-content: space-around; width: 100%; font-size: 0.9rem; }
     .score-correct { color: var(--success); }
     .score-wrong { color: var(--danger); }
     .score-acc { color: var(--accent); }
@@ -121,7 +121,7 @@
       border: 2px solid var(--accent);
       border-radius: 6px;
       pointer-events: none;
-      transition: left 0.08s ease-out, top 0.08s ease-out;
+      transition: left 0.05s linear, top 0.05s linear;
       display: none;
     }
     .freq-display { font-size: 0.85rem; color: #64748b; margin-top: 4px; }
@@ -211,12 +211,12 @@
   
   <div class="footer-bar">
     <div id="freqInfo" class="freq-display">Detected: -- Hz</div>
-    <div id="versionBadge" class="version-tag">v1.8.0</div>
+    <div id="versionBadge" class="version-tag">v1.9.0</div>
   </div>
 </div>
 
 <script>
-const APP_VERSION = "v1.8.0";
+const APP_VERSION = "v1.9.0";
 const VF = Vex.Flow;
 
 const CHROMATIC_NOTES = [
@@ -254,7 +254,8 @@ let audioCtx = null;
 let analyser = null;
 let micStream = null;
 let isRunning = false;
-let metronomeTimer = null;
+let timerId = null;
+let nextNoteTime = 0;
 
 let activeNotes = [];
 let currentNoteIndex = -1;
@@ -291,7 +292,6 @@ const wrapper = document.getElementById("notation-wrapper");
 
 tempoSlider.oninput = () => {
   bpmVal.innerText = tempoSlider.value;
-  if (isRunning) resetMetronome();
 };
 
 startBtn.onclick = async () => {
@@ -341,7 +341,8 @@ async function startApp() {
     currentNoteIndex = -1;
     cursor.style.display = "block";
 
-    resetMetronome();
+    nextNoteTime = audioCtx.currentTime + 0.05;
+    scheduler();
     detectPitch();
   } catch (err) {
     alert("Microphone access is required for pitch detection.");
@@ -350,7 +351,7 @@ async function startApp() {
 
 function stopApp() {
   isRunning = false;
-  if (metronomeTimer) clearTimeout(metronomeTimer);
+  if (timerId) clearTimeout(timerId);
   startBtn.innerText = "Start Practice";
   startBtn.style.background = "var(--accent)";
   controlsPanel.classList.remove("collapsed");
@@ -399,7 +400,7 @@ function getNextNote(forceDuration = null) {
     lastMelodicIndex = nextIdx;
     noteObj = keyPool[nextIdx];
   } else {
-    // Robust Arpeggio & Blues generator using raw chromatic pitches
+    // Universal Arpeggio & Blues Generator
     const rootLetter = rootSelect.value;
     const rootPitches = CHROMATIC_NOTES.filter(n => n.name.startsWith(rootLetter));
     const baseIdx = CHROMATIC_NOTES.indexOf(rootPitches[0] || CHROMATIC_NOTES[0]);
@@ -450,7 +451,6 @@ function generateInitialNotes() {
 
 function regenerateSingleBar(barIdx) {
   const newBar = generateBarNotes();
-  // Find start index of barIdx
   let offset = 0;
   for (let b = 0; b < barIdx; b++) {
     let beats = 0;
@@ -459,7 +459,6 @@ function regenerateSingleBar(barIdx) {
       offset++;
     }
   }
-  // Count how many notes currently exist in target barIdx
   let oldLen = 0;
   let bCount = 0;
   while (bCount < 4 && (offset + oldLen) < activeNotes.length) {
@@ -470,12 +469,17 @@ function regenerateSingleBar(barIdx) {
   activeNotes.splice(offset, oldLen, ...newBar);
 }
 
-function resetMetronome() {
-  if (metronomeTimer) clearTimeout(metronomeTimer);
-  advanceBeat();
+// Hardware-Precision Web Audio API Scheduler Engine
+function scheduler() {
+  while (nextNoteTime < audioCtx.currentTime + 0.1) {
+    advanceBeat(nextNoteTime);
+  }
+  if (isRunning) {
+    timerId = setTimeout(scheduler, 25);
+  }
 }
 
-function playTargetTone() {
+function playTargetTone(time, durationSec) {
   if (!audioCtx || audioCtx.state !== "running" || currentNoteIndex < 0 || currentNoteIndex >= activeNotes.length) return;
   
   const targetNote = activeNotes[currentNoteIndex];
@@ -487,19 +491,17 @@ function playTargetTone() {
   osc.type = "sine";
   osc.frequency.value = targetFreq;
 
-  const toneDuration = targetNote.duration === "8" ? 0.18 : 0.35;
-
-  gain.gain.setValueAtTime(0.001, audioCtx.currentTime);
-  gain.gain.linearRampToValueAtTime(0.2, audioCtx.currentTime + 0.04);
-  gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + toneDuration);
+  gain.gain.setValueAtTime(0.001, time);
+  gain.gain.linearRampToValueAtTime(0.2, time + 0.03);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + durationSec);
 
   osc.connect(gain);
   gain.connect(audioCtx.destination);
-  osc.start();
-  osc.stop(audioCtx.currentTime + toneDuration);
+  osc.start(time);
+  osc.stop(time + durationSec);
 }
 
-function advanceBeat() {
+function advanceBeat(scheduledTime) {
   if (currentNoteIndex >= 0 && !noteEvaluated && currentNoteIndex < activeNotes.length) {
     activeNotes[currentNoteIndex].status = 'wrong';
     wrongCount++;
@@ -511,31 +513,30 @@ function advanceBeat() {
   noteEvaluated = false;
   pitchHoldCounter = 0;
 
-  // 4-BAR RECYCLING SCHEDULE (Synced to Bars 1-4 Start)
-  if (currentNoteIndex >= activeNotes.length) { // Loop back to Bar 1 (Beat 0)
+  // 4-Bar Recycling Schedule
+  if (currentNoteIndex >= activeNotes.length) {
     currentNoteIndex = 0;
-    regenerateSingleBar(2); // Redraw Bar 3 when starting Bar 1
+    regenerateSingleBar(2);
     renderScore();
-  } else if (currentNoteIndex === 4) { // Bar 2 Start (Beat 4)
-    regenerateSingleBar(3); // Redraw Bar 4 when starting Bar 2
+  } else if (currentNoteIndex === 4) {
+    regenerateSingleBar(3);
     renderScore();
-  } else if (currentNoteIndex === 12) { // Bar 4 Start (Beat 12)
-    regenerateSingleBar(0); // Redraw Bars 1 & 2 when starting Bar 4
+  } else if (currentNoteIndex === 12) {
+    regenerateSingleBar(0);
     regenerateSingleBar(1);
     renderScore();
   }
 
   updateCursor();
-  playTargetTone();
+  
+  const curNote = activeNotes[currentNoteIndex];
+  const baseBpm = parseInt(tempoSlider.value);
+  const quarterSec = 60 / baseBpm;
+  const noteDurationSec = (curNote && curNote.duration === "8") ? (quarterSec / 2) : quarterSec;
 
-  if (isRunning) {
-    const baseBpm = parseInt(tempoSlider.value);
-    const quarterMs = (60 / baseBpm) * 1000;
-    const curNote = activeNotes[currentNoteIndex];
-    const durationMs = (curNote && curNote.duration === "8") ? (quarterMs / 2) : quarterMs;
-    
-    metronomeTimer = setTimeout(advanceBeat, durationMs);
-  }
+  playTargetTone(scheduledTime, noteDurationSec * 0.85);
+
+  nextNoteTime += noteDurationSec;
 }
 
 function updateCursor() {
@@ -585,6 +586,8 @@ function renderScore() {
     }
 
     const staveNotes = barNotes.map(n => {
+      // Split key name to parse standard notes vs chromatic accidentals safely
+      const rawKey = n.key.replace('#', '').replace('b', '');
       const sn = new VF.StaveNote({
         clef: "treble",
         keys: [n.key],
@@ -613,6 +616,7 @@ function renderScore() {
     const beams = VF.Beam.generateBeams(staveNotes);
 
     const voice = new VF.Voice({ num_beats: 4, beat_value: 4 });
+    voice.setStrict(false); // Allow formatting across chromatic variations
     voice.addTickables(staveNotes);
 
     new VF.Formatter().joinVoices([voice]).format([voice], containerWidth - 90);
