@@ -31,15 +31,15 @@
       border-radius: 16px;
       box-shadow: 0 10px 25px rgba(0,0,0,0.3);
       width: 100%;
-      max-width: 900px;
+      max-width: 1100px;
       text-align: center;
     }
     .controls {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
       gap: 12px;
       margin-bottom: 20px;
-      align-items: center;
+      align-items: end;
     }
     label {
       display: flex;
@@ -55,7 +55,7 @@
       border: 1px solid #334155;
       background: #0f172a;
       color: var(--text);
-      font-size: 1rem;
+      font-size: 0.95rem;
     }
     button.main-btn {
       background: var(--accent);
@@ -64,16 +64,20 @@
       border: none;
       cursor: pointer;
       padding: 12px;
+      grid-column: span 1;
     }
-    .scoreboard {
+    .info-bar {
       display: flex;
-      justify-content: space-around;
+      justify-content: space-between;
+      align-items: center;
       background: #0f172a;
-      padding: 12px;
+      padding: 12px 20px;
       border-radius: 8px;
       margin-bottom: 15px;
       font-weight: bold;
     }
+    .key-info { color: var(--accent); font-size: 1.05rem; }
+    .scoreboard { display: flex; gap: 20px; }
     .score-correct { color: var(--success); }
     .score-wrong { color: var(--danger); }
     .score-acc { color: var(--accent); }
@@ -132,6 +136,38 @@
       </select>
     </label>
 
+    <label>Pattern Mode
+      <select id="modeSelect">
+        <option value="melodic">Melodic Steps</option>
+        <option value="random">Pure Random</option>
+        <option value="maj_arp">Major Arpeggios</option>
+        <option value="min_arp">Minor Arpeggios</option>
+        <option value="blues">Blues Scale</option>
+      </select>
+    </label>
+
+    <label id="rootLabel">Root Note
+      <select id="rootSelect">
+        <option value="C">C</option>
+        <option value="D">D</option>
+        <option value="E">E</option>
+        <option value="F">F</option>
+        <option value="G">G</option>
+        <option value="A" selected>A</option>
+        <option value="B">B</option>
+      </select>
+    </label>
+
+    <label>Key Signature
+      <select id="keySelect">
+        <option value="C">C Major / A Minor (0 ♭/♯)</option>
+        <option value="F">F Major / D Minor (1 ♭)</option>
+        <option value="Bb">B♭ Major / G Minor (2 ♭)</option>
+        <option value="Eb">E♭ Major / C Minor (3 ♭)</option>
+        <option value="G">G Major / E Minor (1 ♯)</option>
+      </select>
+    </label>
+
     <label>Tempo (BPM): <span id="bpmVal">80</span>
       <input type="range" id="tempoSlider" min="40" max="180" value="80">
     </label>
@@ -139,10 +175,13 @@
     <button id="startBtn" class="main-btn">Start Practice</button>
   </div>
 
-  <div class="scoreboard">
-    <div>Correct: <span id="correctCnt" class="score-correct">0</span></div>
-    <div>Wrong: <span id="wrongCnt" class="score-wrong">0</span></div>
-    <div>Accuracy: <span id="accPct" class="score-acc">100%</span></div>
+  <div class="info-bar">
+    <div id="keyDisplay" class="key-info">Key: C Major (Concert)</div>
+    <div class="scoreboard">
+      <div>Correct: <span id="correctCnt" class="score-correct">0</span></div>
+      <div>Wrong: <span id="wrongCnt" class="score-wrong">0</span></div>
+      <div>Accuracy: <span id="accPct" class="score-acc">100%</span></div>
+    </div>
   </div>
 
   <div id="notation-wrapper">
@@ -156,44 +195,84 @@
 <script>
 const VF = Vex.Flow;
 
-const NOTES = [
-  { name: "A/3", key: "a/3", pitch: "A3", freq: 220.00 },
-  { name: "B/3", key: "b/3", pitch: "B3", freq: 246.94 },
-  { name: "C/4", key: "c/4", pitch: "C4", freq: 261.63 },
-  { name: "D/4", key: "d/4", pitch: "d/4", freq: 293.66 },
-  { name: "E/4", key: "e/4", pitch: "e/4", freq: 329.63 },
-  { name: "F/4", key: "f/4", pitch: "f/4", freq: 349.23 },
-  { name: "G/4", key: "g/4", pitch: "G4", freq: 392.00 },
-  { name: "A/4", key: "a/4", pitch: "A4", freq: 440.00 },
-  { name: "B/4", key: "b/4", pitch: "B4", freq: 493.88 },
-  { name: "C/5", key: "c/5", pitch: "C5", freq: 523.25 }
+// Pitch Master Pool
+const CHROMATIC_NOTES = [
+  { name: "A/3", key: "a/3", freq: 220.00, acc: "" },
+  { name: "Bb/3", key: "bb/3", freq: 233.08, acc: "b" },
+  { name: "B/3", key: "b/3", freq: 246.94, acc: "" },
+  { name: "C/4", key: "c/4", freq: 261.63, acc: "" },
+  { name: "C#/4", key: "c#/4", freq: 277.18, acc: "#" },
+  { name: "D/4", key: "d/4", freq: 293.66, acc: "" },
+  { name: "Eb/4", key: "eb/4", freq: 311.13, acc: "b" },
+  { name: "E/4", key: "e/4", freq: 329.63, acc: "" },
+  { name: "F/4", key: "f/4", freq: 349.23, acc: "" },
+  { name: "F#/4", key: "f#/4", freq: 369.99, acc: "#" },
+  { name: "G/4", key: "g/4", freq: 392.00, acc: "" },
+  { name: "Ab/4", key: "ab/4", freq: 415.30, acc: "b" },
+  { name: "A/4", key: "a/4", freq: 440.00, acc: "" },
+  { name: "Bb/4", key: "bb/4", freq: 466.16, acc: "b" },
+  { name: "B/4", key: "b/4", freq: 493.88, acc: "" },
+  { name: "C/5", key: "c/5", freq: 523.25, acc: "" },
+  { name: "C#/5", key: "c#/5", freq: 554.37, acc: "#" },
+  { name: "D/5", key: "d/5", freq: 587.33, acc: "" },
+  { name: "Eb/5", key: "eb/5", freq: 622.25, acc: "b" },
+  { name: "E/5", key: "e/5", freq: 659.25, acc: "" }
 ];
+
+// Default Diatonic Pool: Low A (A3) to Third Space C (C5)
+const NATURAL_NOTES = CHROMATIC_NOTES.filter(n => !n.acc);
+
+const KEY_DETAILS = {
+  "C":  { name: "C Major / A Minor", vfKey: "C" },
+  "F":  { name: "F Major / D Minor (1 Flat: B♭)", vfKey: "F" },
+  "Bb": { name: "B♭ Major / G Minor (2 Flats: B♭, E♭)", vfKey: "Bb" },
+  "Eb": { name: "E♭ Major / C Minor (3 Flats: B♭, E♭, A♭)", vfKey: "Eb" },
+  "G":  { name: "G Major / E Minor (1 Sharp: F♯)", vfKey: "G" }
+};
 
 let audioCtx, analyser, micStream;
 let isRunning = false;
 let metronomeTimer = null;
 
-let activeNotes = [];
+let activeNotes = []; // 16 note objects (4 bars x 4 beats)
 let currentBeatIndex = -1;
 let noteEvaluated = false;
 let correctCount = 0;
 let wrongCount = 0;
 let pitchHoldCounter = 0;
 
-let animatingBar = null;
+let animatingBars = [];
 let noteXPositions = [];
+let lastMelodicIndex = 4;
 
 const startBtn = document.getElementById("startBtn");
 const tempoSlider = document.getElementById("tempoSlider");
 const bpmVal = document.getElementById("bpmVal");
 const freqInfoEl = document.getElementById("freqInfo");
 const instrumentSelect = document.getElementById("instrumentSelect");
+const modeSelect = document.getElementById("modeSelect");
+const rootSelect = document.getElementById("rootSelect");
+const keySelect = document.getElementById("keySelect");
+const keyDisplay = document.getElementById("keyDisplay");
 const cursor = document.getElementById("cursor");
 const wrapper = document.getElementById("notation-wrapper");
 
 tempoSlider.oninput = () => {
   bpmVal.innerText = tempoSlider.value;
   if (isRunning) resetMetronome();
+};
+
+keySelect.onchange = () => {
+  keyDisplay.innerText = `Key: ${KEY_DETAILS[keySelect.value].name}`;
+  if (isRunning) {
+    generateInitialNotes();
+    renderScore();
+  }
+};
+
+modeSelect.onchange = () => {
+  const isArpOrBlues = ["maj_arp", "min_arp", "blues"].includes(modeSelect.value);
+  rootSelect.parentElement.style.opacity = isArpOrBlues ? "1" : "0.4";
 };
 
 startBtn.onclick = async () => {
@@ -257,47 +336,56 @@ function updateScoreboard() {
   document.getElementById("accPct").innerText = `${pct}%`;
 }
 
+// NOTE GENERATORS
+function getNextNote() {
+  const mode = modeSelect.value;
+  let noteObj;
 
-let lastNoteIndex = 4; // Start near middle (E4)
-
-function getMelodicNextNote() {
-  const roll = Math.random();
-  let step = 0;
-
-  if (roll < 0.70) {
-    // 70% Stepwise motion (+1 or -1 step)
-    step = Math.random() < 0.5 ? 1 : -1;
-  } else if (roll < 0.90) {
-    // 20% Skip / Arpeggio (+2 or -2 steps)
-    step = Math.random() < 0.5 ? 2 : -2;
+  if (mode === "random") {
+    noteObj = NATURAL_NOTES[Math.floor(Math.random() * NATURAL_NOTES.length)];
+  } else if (mode === "melodic") {
+    const roll = Math.random();
+    let step = roll < 0.70 ? (Math.random() < 0.5 ? 1 : -1) : (roll < 0.90 ? (Math.random() < 0.5 ? 2 : -2) : (Math.random() < 0.5 ? 3 : -3));
+    let nextIdx = lastMelodicIndex + step;
+    if (nextIdx < 0) nextIdx = 1;
+    if (nextIdx >= NATURAL_NOTES.length) nextIdx = NATURAL_NOTES.length - 2;
+    lastMelodicIndex = nextIdx;
+    noteObj = NATURAL_NOTES[nextIdx];
   } else {
-    // 10% Larger leap (+3 or -3 steps)
-    step = Math.random() < 0.5 ? 3 : -3;
+    // Arpeggio & Blues generator using full CHROMATIC_NOTES
+    const rootLetter = rootSelect.value;
+    const rootPitches = CHROMATIC_NOTES.filter(n => n.name.startsWith(rootLetter));
+    const baseIdx = CHROMATIC_NOTES.indexOf(rootPitches[0] || CHROMATIC_NOTES[0]);
+    
+    let intervals = [];
+    if (mode === "maj_arp") intervals = [0, 4, 7, 12, 7, 4];
+    else if (mode === "min_arp") intervals = [0, 3, 7, 12, 7, 3];
+    else if (mode === "blues") intervals = [0, 3, 5, 6, 7, 10, 12];
+
+    const chosenInterval = intervals[Math.floor(Math.random() * intervals.length)];
+    let targetIdx = baseIdx + chosenInterval;
+    if (targetIdx >= CHROMATIC_NOTES.length) targetIdx = baseIdx;
+    noteObj = CHROMATIC_NOTES[targetIdx];
   }
 
-  let nextIndex = lastNoteIndex + step;
-
-  // Bounce back if we exceed lower or upper boundaries
-  if (nextIndex < 0) nextIndex = 1;
-  if (nextIndex >= NOTES.length) nextIndex = NOTES.length - 2;
-
-  lastNoteIndex = nextIndex;
-  return { ...NOTES[nextIndex], status: 'pending' };
+  return { ...noteObj, status: 'pending' };
 }
 
 function generateInitialNotes() {
   activeNotes = [];
-  lastNoteIndex = 4; // Reset near middle C/E4
-  for (let i = 0; i < 12; i++) {
-    activeNotes.push(getMelodicNextNote());
+  lastMelodicIndex = 4;
+  for (let i = 0; i < 16; i++) {
+    activeNotes.push(getNextNote());
   }
 }
 
-function regenerateBar(barIndex) {
-  for (let i = 0; i < 4; i++) {
-    activeNotes[barIndex * 4 + i] = getMelodicNextNote();
-  }
-  animatingBar = barIndex;
+function regenerateBars(barIndices) {
+  barIndices.forEach(barIdx => {
+    for (let i = 0; i < 4; i++) {
+      activeNotes[barIdx * 4 + i] = getNextNote();
+    }
+  });
+  animatingBars = barIndices;
   renderScore();
 }
 
@@ -333,13 +421,17 @@ function advanceBeat() {
   noteEvaluated = false;
   pitchHoldCounter = 0;
 
-  if (currentBeatIndex >= 12) {
+  // 4-BAR REFRESH TIMINGS
+  if (currentBeatIndex === 12) {
+    // Entered Bar 4 (Beat 12): Regenerate Bars 1 and 2
+    regenerateBars([0, 1]);
+  } else if (currentBeatIndex >= 16) {
+    // Loop back to Bar 1 (Beat 0): Regenerate Bar 3
     currentBeatIndex = 0;
-    regenerateBar(1);
-  } else if (currentBeatIndex === 2) {
-    regenerateBar(2);
-  } else if (currentBeatIndex === 8) {
-    regenerateBar(0);
+    regenerateBars([2]);
+  } else if (currentBeatIndex === 4) {
+    // Finished Bar 1 (Entered Bar 2 / Beat 4): Regenerate Bar 4
+    regenerateBars([3]);
   }
 
   updateCursor();
@@ -363,23 +455,27 @@ function renderScore() {
   div.innerHTML = "";
   noteXPositions = [];
 
-  const widthPerBar = 250;
+  const widthPerBar = 240;
   const renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
-  renderer.resize(widthPerBar * 3 + 40, 150);
+  renderer.resize(widthPerBar * 4 + 40, 150);
   const context = renderer.getContext();
+  const currentKeySig = keySelect.value;
 
-  for (let bar = 0; bar < 3; bar++) {
+  for (let bar = 0; bar < 4; bar++) {
     const group = context.openGroup();
     group.id = `bar-group-${bar}`;
     
-    if (bar === animatingBar) {
+    if (animatingBars.includes(bar)) {
       group.classList.add('bar-animating');
     }
 
     const xPos = 10 + (bar * widthPerBar);
     const stave = new VF.Stave(xPos, 10, widthPerBar);
     
-    if (bar === 0) stave.addClef("treble");
+    if (bar === 0) {
+      stave.addClef("treble");
+      stave.addKeySignature(currentKeySig);
+    }
     stave.setContext(context).draw();
 
     const barNotes = activeNotes.slice(bar * 4, (bar * 4) + 4);
@@ -389,6 +485,10 @@ function renderScore() {
         keys: [n.key],
         duration: "q"
       });
+
+      if (n.acc) {
+        sn.addAccidental(0, new VF.Accidental(n.acc));
+      }
 
       if (n.status === "correct") {
         sn.setStyle({ fillStyle: "#22c55e", strokeStyle: "#22c55e" });
@@ -402,16 +502,14 @@ function renderScore() {
     const voice = new VF.Voice({ num_beats: 4, beat_value: 4 });
     voice.addTickables(staveNotes);
 
-    new VF.Formatter().joinVoices([voice]).format([voice], widthPerBar - 60);
+    new VF.Formatter().joinVoices([voice]).format([voice], widthPerBar - 70);
     voice.draw(context, stave);
 
-    // Calculate position relative to container based on rendered bounding box
     const wrapperRect = wrapper.getBoundingClientRect();
     staveNotes.forEach(sn => {
       const el = sn.getSVGElement();
       if (el) {
         const rect = el.getBoundingClientRect();
-        // Center the cursor box (width: 45px) over notehead X coordinate
         const centerX = (rect.left + rect.width / 2) - wrapperRect.left - 22;
         noteXPositions.push(centerX);
       }
@@ -420,7 +518,7 @@ function renderScore() {
     context.closeGroup();
   }
   
-  animatingBar = null;
+  animatingBars = [];
   updateCursor();
 }
 
@@ -470,7 +568,7 @@ function detectPitch() {
   if (pitch !== -1) {
     freqInfoEl.innerText = `Detected: ${Math.round(pitch)} Hz`;
     
-    if (currentBeatIndex >= 0 && currentBeatIndex < 12 && !noteEvaluated) {
+    if (currentBeatIndex >= 0 && currentBeatIndex < 16 && !noteEvaluated) {
       const targetNote = activeNotes[currentBeatIndex];
       const targetFreq = getSoundingFrequency(targetNote.freq);
       
