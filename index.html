@@ -93,7 +93,7 @@
       font-weight: bold;
     }
     .key-info { color: var(--accent); font-size: 0.95rem; }
-    .scoreboard { display: flex; justify-content: space-around; width: 100%; font-size: 0.9rem; }
+    .scoreboard { display: flex; justify-space-around; width: 100%; font-size: 0.9rem; }
     .score-correct { color: var(--success); }
     .score-wrong { color: var(--danger); }
     .score-acc { color: var(--accent); }
@@ -211,12 +211,12 @@
   
   <div class="footer-bar">
     <div id="freqInfo" class="freq-display">Detected: -- Hz</div>
-    <div id="versionBadge" class="version-tag">v1.7.0</div>
+    <div id="versionBadge" class="version-tag">v1.8.0</div>
   </div>
 </div>
 
 <script>
-const APP_VERSION = "v1.7.0";
+const APP_VERSION = "v1.8.0";
 const VF = Vex.Flow;
 
 const CHROMATIC_NOTES = [
@@ -386,7 +386,7 @@ function getNextNote(forceDuration = null) {
   const mode = modeSelect.value;
   const keyPool = getFilteredNotesForKey();
   let noteObj;
-  let duration = forceDuration || "q"; // "q" for quarter, "8" for eighth
+  let duration = forceDuration || "q";
 
   if (mode === "random") {
     noteObj = keyPool[Math.floor(Math.random() * keyPool.length)];
@@ -399,6 +399,7 @@ function getNextNote(forceDuration = null) {
     lastMelodicIndex = nextIdx;
     noteObj = keyPool[nextIdx];
   } else {
+    // Robust Arpeggio & Blues generator using raw chromatic pitches
     const rootLetter = rootSelect.value;
     const rootPitches = CHROMATIC_NOTES.filter(n => n.name.startsWith(rootLetter));
     const baseIdx = CHROMATIC_NOTES.indexOf(rootPitches[0] || CHROMATIC_NOTES[0]);
@@ -419,7 +420,6 @@ function getNextNote(forceDuration = null) {
   return { ...noteObj, status: 'pending', duration: duration };
 }
 
-// Generate Notes per Bar to equal exactly 4 beats (4 Quarter or pairs of Eighths)
 function generateBarNotes() {
   const notes = [];
   let beatsInBar = 0;
@@ -446,6 +446,28 @@ function generateInitialNotes() {
   for (let b = 0; b < 4; b++) {
     activeNotes.push(...generateBarNotes());
   }
+}
+
+function regenerateSingleBar(barIdx) {
+  const newBar = generateBarNotes();
+  // Find start index of barIdx
+  let offset = 0;
+  for (let b = 0; b < barIdx; b++) {
+    let beats = 0;
+    while (beats < 4 && offset < activeNotes.length) {
+      beats += (activeNotes[offset].duration === "8" ? 0.5 : 1);
+      offset++;
+    }
+  }
+  // Count how many notes currently exist in target barIdx
+  let oldLen = 0;
+  let bCount = 0;
+  while (bCount < 4 && (offset + oldLen) < activeNotes.length) {
+    bCount += (activeNotes[offset + oldLen].duration === "8" ? 0.5 : 1);
+    oldLen++;
+  }
+
+  activeNotes.splice(offset, oldLen, ...newBar);
 }
 
 function resetMetronome() {
@@ -489,9 +511,17 @@ function advanceBeat() {
   noteEvaluated = false;
   pitchHoldCounter = 0;
 
-  if (currentNoteIndex >= activeNotes.length) {
+  // 4-BAR RECYCLING SCHEDULE (Synced to Bars 1-4 Start)
+  if (currentNoteIndex >= activeNotes.length) { // Loop back to Bar 1 (Beat 0)
     currentNoteIndex = 0;
-    generateInitialNotes();
+    regenerateSingleBar(2); // Redraw Bar 3 when starting Bar 1
+    renderScore();
+  } else if (currentNoteIndex === 4) { // Bar 2 Start (Beat 4)
+    regenerateSingleBar(3); // Redraw Bar 4 when starting Bar 2
+    renderScore();
+  } else if (currentNoteIndex === 12) { // Bar 4 Start (Beat 12)
+    regenerateSingleBar(0); // Redraw Bars 1 & 2 when starting Bar 4
+    regenerateSingleBar(1);
     renderScore();
   }
 
@@ -546,7 +576,6 @@ function renderScore() {
     if (bar === 0) stave.addKeySignature(currentKeySig);
     stave.setContext(context).draw();
 
-    // Collect notes for this measure
     const barNotes = [];
     let barBeats = 0;
     while (barBeats < 4 && noteOffset + barNotes.length < activeNotes.length) {
@@ -581,7 +610,6 @@ function renderScore() {
       return sn;
     });
 
-    // Beam 8th note pairs automatically
     const beams = VF.Beam.generateBeams(staveNotes);
 
     const voice = new VF.Voice({ num_beats: 4, beat_value: 4 });
