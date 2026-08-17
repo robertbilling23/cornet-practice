@@ -257,21 +257,45 @@ function updateScoreboard() {
   document.getElementById("accPct").innerText = `${pct}%`;
 }
 
-function getRandomNote() {
-  const note = NOTES[Math.floor(Math.random() * NOTES.length)];
-  return { ...note, status: 'pending' };
+
+let lastNoteIndex = 4; // Start near middle (E4)
+
+function getMelodicNextNote() {
+  const roll = Math.random();
+  let step = 0;
+
+  if (roll < 0.70) {
+    // 70% Stepwise motion (+1 or -1 step)
+    step = Math.random() < 0.5 ? 1 : -1;
+  } else if (roll < 0.90) {
+    // 20% Skip / Arpeggio (+2 or -2 steps)
+    step = Math.random() < 0.5 ? 2 : -2;
+  } else {
+    // 10% Larger leap (+3 or -3 steps)
+    step = Math.random() < 0.5 ? 3 : -3;
+  }
+
+  let nextIndex = lastNoteIndex + step;
+
+  // Bounce back if we exceed lower or upper boundaries
+  if (nextIndex < 0) nextIndex = 1;
+  if (nextIndex >= NOTES.length) nextIndex = NOTES.length - 2;
+
+  lastNoteIndex = nextIndex;
+  return { ...NOTES[nextIndex], status: 'pending' };
 }
 
 function generateInitialNotes() {
   activeNotes = [];
+  lastNoteIndex = 4; // Reset near middle C/E4
   for (let i = 0; i < 12; i++) {
-    activeNotes.push(getRandomNote());
+    activeNotes.push(getMelodicNextNote());
   }
 }
 
 function regenerateBar(barIndex) {
   for (let i = 0; i < 4; i++) {
-    activeNotes[barIndex * 4 + i] = getRandomNote();
+    activeNotes[barIndex * 4 + i] = getMelodicNextNote();
   }
   animatingBar = barIndex;
   renderScore();
